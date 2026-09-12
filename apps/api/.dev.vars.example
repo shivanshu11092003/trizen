@@ -1,0 +1,12 @@
+# Copy to .dev.vars for local development. Never commit .dev.vars.
+# Generate each with: openssl rand -base64 32
+
+CURSOR_SECRET="dev-cursor-secret-change-me"
+PIN_PEPPER="dev-pin-pepper-change-me"
+IP_HASH_PEPPER="dev-ip-pepper-change-me"
+
+# Supabase Postgres transaction-pooler URI and server-only service role key.
+DATABASE_URL="postgresql://postgres.PROJECT_REF:YOUR_PASSWORD@aws-0-REGION.pooler.supabase.com:6543/postgres"
+SUPABASE_URL="https://PROJECT_REF.supabase.co"
+SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
+SUPABASE_STORAGE_BUCKET="photos-originals"
