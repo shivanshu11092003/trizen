@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["ES2023"],
+    "types": ["@cloudflare/workers-types/2023-07-01", "vitest/globals"],
+    "jsx": "react-jsx"
+  },
+  "include": ["src", "test", "scripts", "worker-configuration.d.ts"]
+}
