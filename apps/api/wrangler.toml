@@ -1,0 +1,22 @@
+name = "photos-api"
+main = "src/index.ts"
+compatibility_date = "2024-12-05"
+compatibility_flags = ["nodejs_compat"]
+
+# Single origin: the Worker owns /api/*, /img/*, /docs and /redoc on the same
+# hostname Pages serves the SPA from. That is what makes first-party
+# SameSite=Strict session cookies possible and removes CORS entirely.
+
+[vars]
+DOCS_ENABLED = "true"
+PUBLIC_ORIGIN = "http://localhost:5173"
+
+[triggers]
+crons = ["*/30 * * * *"]
+
+[observability]
+enabled = true
+
+[env.production]
+name = "photos-api"
+vars = { DOCS_ENABLED = "false", PUBLIC_ORIGIN = "https://photos.example.com" }
