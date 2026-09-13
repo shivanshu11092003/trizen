@@ -826,12 +826,12 @@ function PhotoGrid({
                   {canMark(photo) && (
                     <button
                       disabled={disabled}
-                      className={`${canCurate ? 'select-dot' : 'mark-dot'} ${marked || (canCurate && photo.isSelected) ? 'selected' : ''}`}
+                      className={`${canCurate ? 'select-dot' : 'mark-dot'} ${marked ? 'selected' : ''}`}
                       aria-label={`${canCurate ? 'Select' : 'Mark'} ${photo.filename}`}
                       aria-pressed={marked}
                       onClick={() => onPick(photo)}
                     >
-                      {marked || (canCurate && photo.isSelected) ? <Check /> : null}
+                      {marked ? <Check /> : null}
                     </button>
                   )}
                   <div className="photo-caption">
