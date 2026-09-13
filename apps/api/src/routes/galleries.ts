@@ -37,7 +37,7 @@ const galleryFields = {
   lastViewedAt: galleries.lastViewedAt,
   createdAt: galleries.createdAt,
   photoCount:
-    sql<number>`(SELECT COUNT(*) FROM ${galleryPhotos} WHERE ${galleryPhotos.galleryId} = ${galleries.id})`.mapWith(
+    sql<number>`(SELECT COUNT(*) FROM ${galleryPhotos} INNER JOIN ${photos} ON ${photos.id} = ${galleryPhotos.photoId} WHERE ${galleryPhotos.galleryId} = ${galleries.id} AND ${photos.status} = 'ready')`.mapWith(
       Number,
     ),
 };

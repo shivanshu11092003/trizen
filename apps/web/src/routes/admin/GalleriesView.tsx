@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { App, Modal, Popconfirm, Table, Tag, type TableColumnsType } from 'antd';
 import { Copy, Plus } from 'lucide-react';
 import { api } from '../../lib/api';
@@ -11,7 +11,12 @@ export function GalleriesView({ eventId }: { eventId: string }) {
   const [credentials, setCredentials] = useState<{ url: string; pin: string } | null>(null);
   const { notification, message } = App.useApp();
   const queryClient = useQueryClient();
-  const query = useQuery({ queryKey: ['galleries', eventId], queryFn: () => api.galleries(eventId) });
+  const query = useInfiniteQuery({
+    queryKey: ['galleries', eventId],
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => api.galleries(eventId, pageParam),
+    getNextPageParam: (last) => last.pageInfo.nextCursor ?? undefined,
+  });
   const stats = useQuery({ queryKey: ['stats', eventId], queryFn: () => api.stats(eventId) });
   const refresh = () =>
     Promise.all(
@@ -118,14 +123,32 @@ export function GalleriesView({ eventId }: { eventId: string }) {
       <section className="panel table-panel">
         <Table
           rowKey="id"
-          dataSource={query.data?.data ?? []}
+          dataSource={query.data?.pages.flatMap((page) => page.data) ?? []}
           columns={columns}
           pagination={false}
+          scroll={{ x: 650 }}
           loading={query.isPending}
         />
       </section>
+      {query.hasNextPage && (
+        <button
+          className="load-more"
+          disabled={query.isFetchingNextPage}
+          onClick={() => void query.fetchNextPage()}
+        >
+          Load more galleries
+        </button>
+      )}
       <Modal title="Create a gallery" open={open} footer={null} onCancel={() => setOpen(false)}>
         <form className="modal-form" onSubmit={(event) => void create(event)}>
+          {stats.isError && (
+            <p role="alert">
+              {stats.error.message}{' '}
+              <button type="button" onClick={() => void stats.refetch()}>
+                Retry
+              </button>
+            </p>
+          )}
           <p>
             {stats.data?.selectedPhotos ?? 0} selected photographs will be included. Later selection changes
             won’t alter this gallery.

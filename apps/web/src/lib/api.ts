@@ -1,5 +1,7 @@
 import {
   deleteApiV1EventsByEventIdMembersByUserId,
+  deleteApiV1PhotosByPhotoId,
+  postApiV1EventsByEventIdPhotosDelete,
   getApiV1AuthMe,
   getApiV1Events,
   getApiV1EventsByEventId,
@@ -81,6 +83,11 @@ export const api = {
   photos: (eventId: string, options: Record<string, string | number | boolean | undefined>) =>
     unwrap<Page<Photo>>(
       getApiV1EventsByEventIdPhotos({ path: { eventId }, query: { limit: 48, ...options } } as never),
+    ),
+  deletePhoto: (photoId: string) => unwrap<void>(deleteApiV1PhotosByPhotoId({ path: { photoId } })),
+  deletePhotos: (eventId: string, photoIds: string[]) =>
+    unwrap<{ deleted: number }>(
+      postApiV1EventsByEventIdPhotosDelete({ path: { eventId }, body: { photoIds } }),
     ),
   selectPhotos: async (eventId: string, photoIds: string[], selected: boolean) => {
     let updated = 0;

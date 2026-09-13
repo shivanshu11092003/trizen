@@ -23,6 +23,7 @@ import {
   postApiV1EventsByEventIdPhotosSelect,
   deleteApiV1PhotosByPhotoId,
   patchApiV1PhotosByPhotoId,
+  postApiV1EventsByEventIdPhotosDelete,
   getApiV1EventsByEventIdGalleries,
   postApiV1EventsByEventIdGalleries,
   postApiV1GalleriesByGalleryIdPublish,
@@ -99,6 +100,9 @@ import type {
   PatchApiV1PhotosByPhotoIdData,
   PatchApiV1PhotosByPhotoIdError,
   PatchApiV1PhotosByPhotoIdResponse,
+  PostApiV1EventsByEventIdPhotosDeleteData,
+  PostApiV1EventsByEventIdPhotosDeleteError,
+  PostApiV1EventsByEventIdPhotosDeleteResponse,
   GetApiV1EventsByEventIdGalleriesData,
   GetApiV1EventsByEventIdGalleriesError,
   GetApiV1EventsByEventIdGalleriesResponse,
@@ -1087,7 +1091,7 @@ export const postApiV1EventsByEventIdPhotosSelectMutation = (
 
 /**
  * Delete a photo
- * Soft delete, restorable for 30 days. The event lead can delete anything; an uploader can delete their own upload within 15 minutes of uploading it.
+ * Removes a photo from event lists and galleries. Originals remain private in storage. The event lead can delete anything; an uploader can delete their own upload within 15 minutes of uploading it.
  */
 export const deleteApiV1PhotosByPhotoIdMutation = (
   options?: Partial<Options<DeleteApiV1PhotosByPhotoIdData>>,
@@ -1131,6 +1135,59 @@ export const patchApiV1PhotosByPhotoIdMutation = (
   > = {
     mutationFn: async (localOptions) => {
       const { data } = await patchApiV1PhotosByPhotoId({
+        ...options,
+        ...localOptions,
+        throwOnError: true,
+      });
+      return data;
+    },
+  };
+  return mutationOptions;
+};
+
+export const postApiV1EventsByEventIdPhotosDeleteQueryKey = (
+  options: Options<PostApiV1EventsByEventIdPhotosDeleteData>,
+) => createQueryKey('postApiV1EventsByEventIdPhotosDelete', options);
+
+/**
+ * Delete multiple photos
+ * Deletes up to 500 photos atomically. Leads may delete event photos; members may delete their own uploads within 15 minutes. Any missing or forbidden photo rejects the entire batch. Originals remain private in storage.
+ */
+export const postApiV1EventsByEventIdPhotosDeleteOptions = (
+  options: Options<PostApiV1EventsByEventIdPhotosDeleteData>,
+) => {
+  return queryOptions({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await postApiV1EventsByEventIdPhotosDelete({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      });
+      return data;
+    },
+    queryKey: postApiV1EventsByEventIdPhotosDeleteQueryKey(options),
+  });
+};
+
+/**
+ * Delete multiple photos
+ * Deletes up to 500 photos atomically. Leads may delete event photos; members may delete their own uploads within 15 minutes. Any missing or forbidden photo rejects the entire batch. Originals remain private in storage.
+ */
+export const postApiV1EventsByEventIdPhotosDeleteMutation = (
+  options?: Partial<Options<PostApiV1EventsByEventIdPhotosDeleteData>>,
+): UseMutationOptions<
+  PostApiV1EventsByEventIdPhotosDeleteResponse,
+  PostApiV1EventsByEventIdPhotosDeleteError,
+  Options<PostApiV1EventsByEventIdPhotosDeleteData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    PostApiV1EventsByEventIdPhotosDeleteResponse,
+    PostApiV1EventsByEventIdPhotosDeleteError,
+    Options<PostApiV1EventsByEventIdPhotosDeleteData>
+  > = {
+    mutationFn: async (localOptions) => {
+      const { data } = await postApiV1EventsByEventIdPhotosDelete({
         ...options,
         ...localOptions,
         throwOnError: true,

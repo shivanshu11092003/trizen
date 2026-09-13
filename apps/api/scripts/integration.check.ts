@@ -206,6 +206,41 @@ try {
   await anonymous.request(`/img/full/${leadPhoto.storageKey}`, 'GET', undefined, 401);
   await member.request(`/api/v1/photos/${leadPhoto.photoId}`, 'PATCH', { caption: 'Not mine' }, 403);
   await member.request(`/api/v1/photos/${leadPhoto.photoId}`, 'DELETE', undefined, 403);
+  const bulkDelete = `/api/v1/events/${event.id}/photos/delete`;
+  await anonymous.request(bulkDelete, 'POST', { photoIds: [leadPhoto.photoId] }, 401);
+  await outsider.request(`/api/v1/photos/${leadPhoto.photoId}`, 'DELETE', undefined, 404);
+  await outsider.request(bulkDelete, 'POST', { photoIds: [leadPhoto.photoId] }, 404);
+  await lead.request(bulkDelete, 'POST', { photoIds: [] }, 422);
+  await lead.request(bulkDelete, 'POST', { photoIds: Array(501).fill(leadPhoto.photoId) }, 422);
+  await lead.request(bulkDelete, 'POST', { photoIds: [leadPhoto.photoId] }, 403, false);
+  await member.request(bulkDelete, 'POST', { photoIds: [intent.uploads[0].photoId, leadPhoto.photoId] }, 403);
+  assert.equal(
+    (await lead.json(`/api/v1/events/${event.id}/photos`)).data.length,
+    3,
+    'Forbidden batch must not partially delete',
+  );
+  const foreign = await outsider.json(`/api/v1/events/${otherEvent.id}/photos/upload-intent`, 'POST', {
+    files: [{ filename: 'foreign.png', contentType: 'image/png', fileSize: image.length }],
+  });
+  await lead.request(bulkDelete, 'POST', { photoIds: [leadPhoto.photoId, foreign.uploads[0].photoId] }, 404);
+  assert.equal(
+    (await lead.json(`/api/v1/events/${event.id}/photos`)).data.length,
+    3,
+    'Cross-event batch must not partially delete',
+  );
+  await db`update photos set created_at=${Date.now() - 16 * 60 * 1000} where id=${intent.uploads[2].photoId}`;
+  await member.request(`/api/v1/photos/${intent.uploads[2].photoId}`, 'DELETE', undefined, 403);
+  await member.request(
+    bulkDelete,
+    'POST',
+    { photoIds: [intent.uploads[1].photoId, intent.uploads[2].photoId] },
+    403,
+  );
+  assert.equal(
+    (await member.json(`/api/v1/events/${event.id}/photos`)).data.length,
+    2,
+    'Expired-photo batch must not partially delete',
+  );
   const selectedId = intent.uploads[0].photoId;
   await member.request(
     `/api/v1/events/${event.id}/photos/select`,
@@ -275,6 +310,35 @@ try {
   const rotated = await lead.json(`/api/v1/galleries/${created.gallery.id}/rotate-pin`, 'POST');
   await customer.request(`${base}/unlock`, 'POST', { pin: '482917' }, 401);
   await customer.request(`${base}/unlock`, 'POST', { pin: rotated.pin }, 204);
+  // Single deletion by the uploader, including rejection of stale upload confirmations.
+  await member.request(`/api/v1/photos/${intent.uploads[1].photoId}`, 'DELETE', undefined, 204);
+  const reconfirm = await member.json(`/api/v1/events/${event.id}/photos/confirm`, 'POST', {
+    items: [{ photoId: intent.uploads[1].photoId }],
+  });
+  assert.deepEqual(reconfirm.missing, [intent.uploads[1].photoId]);
+  await lead.request(`/api/v1/photos/${intent.uploads[2].photoId}`, 'DELETE', undefined, 204);
+  await db`update galleries set cover_photo_id=${selectedId} where id=${created.gallery.id}`;
+  const removed = await lead.json(bulkDelete, 'POST', {
+    photoIds: [selectedId, leadPhoto.photoId, selectedId],
+  });
+  assert.equal(removed.deleted, 2, 'Duplicate IDs should be deleted only once');
+  assert.equal(
+    (await lead.json(bulkDelete, 'POST', { photoIds: [selectedId, leadPhoto.photoId] })).deleted,
+    0,
+    'Retries are idempotent',
+  );
+  await lead.request(`/api/v1/photos/${leadPhoto.photoId}`, 'DELETE', undefined, 204);
+  assert.equal((await lead.json(`/api/v1/events/${event.id}/photos`)).data.length, 0);
+  assert.equal((await lead.json(`/api/v1/events/${event.id}/stats`)).readyPhotos, 0);
+  assert.equal((await lead.json(`/api/v1/events/${event.id}/galleries`)).data[0].photoCount, 0);
+  const teaser = await customer.json(base);
+  assert.equal(teaser.photoCount, 0);
+  assert.equal(teaser.coverThumbUrl, null);
+  assert.equal((await customer.json(`${base}/photos`)).data.length, 0);
+  await customer.request(`${base}/photos/${selectedId}/image/full`, 'GET', undefined, 404);
+  await lead.request(`/img/full/${leadPhoto.storageKey}`, 'GET', undefined, 404);
+  const emptyZip = await customer.request(`${base}/download-all`);
+  assert.equal((await emptyZip.arrayBuffer()).byteLength, 22, 'Deleted photos must not appear in the ZIP');
   await lead.request(`/api/v1/events/${event.id}/members/${added.userId}`, 'DELETE', undefined, 204);
   await member.request(`/api/v1/events/${event.id}/photos`, 'GET', undefined, 404);
   await lead.request('/api/v1/auth/logout', 'POST', undefined, 204);

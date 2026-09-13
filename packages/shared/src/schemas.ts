@@ -214,6 +214,10 @@ export const SelectPhotosBody = z.object({
   selected: z.boolean(),
 });
 
+export const DeletePhotosBody = z.object({
+  photoIds: z.array(Ulid).min(1).max(500),
+});
+
 export const PatchPhotoBody = z.object({
   caption: z.string().trim().max(500).nullable().optional(),
   isSelected: z.boolean().optional(),

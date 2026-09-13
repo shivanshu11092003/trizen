@@ -196,6 +196,34 @@ function GalleryView({
   useEffect(() => {
     if (query.error instanceof ApiError && [401, 404, 410].includes(query.error.status)) onSessionEnded();
   }, [query.error]);
+  useEffect(() => {
+    if (!lightbox) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.querySelector<HTMLButtonElement>('.lightbox-close')?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setLightbox(null);
+      if (event.key === 'Tab') {
+        const controls = Array.from(document.querySelectorAll<HTMLElement>('.lightbox button, .lightbox a'));
+        const first = controls[0],
+          last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, [lightbox, setLightbox]);
   const base = `/api/v1/public/galleries/${encodeURIComponent(slug)}`;
   return (
     <main className="gallery-page">
@@ -234,6 +262,7 @@ function GalleryView({
           <button
             key={photo.id}
             className={`masonry-item item-${index % 7}`}
+            aria-label={`Open ${photo.caption || photo.filename}`}
             onClick={() => setLightbox(photo)}
           >
             <PhotoImage photo={photo} index={index} publicSlug={slug} />
@@ -241,6 +270,11 @@ function GalleryView({
           </button>
         ))}
       </section>
+      {!query.isPending && !query.isError && photos.length === 0 && (
+        <p className="gallery-empty" role="status">
+          No photographs are currently available. Your photographer may be updating this collection.
+        </p>
+      )}
       {query.hasNextPage && (
         <button
           className="gallery-more"

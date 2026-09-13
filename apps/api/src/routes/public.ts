@@ -108,7 +108,8 @@ publicRoutes.openapi(
       .get('db')
       .select({ value: count() })
       .from(galleryPhotos)
-      .where(eq(galleryPhotos.galleryId, gallery.id));
+      .innerJoin(photos, eq(photos.id, galleryPhotos.photoId))
+      .where(and(eq(galleryPhotos.galleryId, gallery.id), eq(photos.status, 'ready')));
     const token = readGalleryCookie(c, slug);
     const unlocked = token ? Boolean(await resolveGallerySession(c, token, gallery.id)) : false;
     return c.json({

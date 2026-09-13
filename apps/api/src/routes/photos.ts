@@ -3,6 +3,7 @@ import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
 import {
   AppError,
   ConfirmUploadBody,
+  DeletePhotosBody,
   PatchPhotoBody,
   Photo,
   PhotoListQuery,
@@ -20,13 +21,11 @@ import { authErrors, err, listErrors, ok } from '../lib/openapi.js';
 import { photoSorts } from '../lib/sorts.js';
 import { requireEventRole, sessionAuth } from '../middleware/auth.js';
 import { audit } from '../services/audit.js';
+import { deletePhotos } from '../services/photo-deletion.js';
 import { createSignedUpload, storageKeyFor, storageObjectInfo } from '../services/storage.js';
 import type { AppBindings } from '../types.js';
 
 export const photoRoutes = apiRouter();
-
-/** An uploader may delete their own mistake, but only for a short while. */
-const SELF_DELETE_WINDOW_MS = 15 * 60 * 1000;
 
 /* ----------------------------- upload intent ---------------------------- */
 
@@ -147,9 +146,11 @@ photoRoutes.openapi(
     let confirmed = 0;
 
     for (const item of items) {
-      const [photo] = await db.select().from(photos).where(and(
-        eq(photos.id, item.photoId), eq(photos.eventId, eventId), eq(photos.uploadedBy, s.userId),
-      )).limit(1);
+      const [photo] = await db
+        .select()
+        .from(photos)
+        .where(and(eq(photos.id, item.photoId), eq(photos.eventId, eventId), eq(photos.uploadedBy, s.userId)))
+        .limit(1);
       if (!photo || (photo.status !== 'pending' && photo.status !== 'ready')) {
         missing.push(item.photoId);
         continue;
@@ -159,7 +160,11 @@ photoRoutes.openapi(
         continue;
       }
       const object = await storageObjectInfo(c.env, photo.storageKey);
-      if (!object || object.size !== photo.fileSize || object.contentType.split(';')[0] !== photo.contentType) {
+      if (
+        !object ||
+        object.size !== photo.fileSize ||
+        object.contentType.split(';')[0] !== photo.contentType
+      ) {
         missing.push(item.photoId);
         continue;
       }
@@ -212,7 +217,12 @@ photoRoutes.openapi(
       params: z.object({ eventId: Ulid }),
       query: PhotoListQuery,
     },
-    responses: { 200: ok(page(Photo), 'A page of photos.'), ...authErrors, ...listErrors, 404: err('No such event.') },
+    responses: {
+      200: ok(page(Photo), 'A page of photos.'),
+      ...authErrors,
+      ...listErrors,
+      404: err('No such event.'),
+    },
   }),
   async (c) => {
     const { eventId } = c.req.valid('param');
@@ -297,7 +307,11 @@ photoRoutes.openapi(
       .where(and(eq(photos.eventId, eventId), inArray(photos.id, photoIds)))
       .returning({ id: photos.id });
 
-    await audit(c, { action: selected ? 'photo.selected' : 'photo.deselected', eventId, metadata: { count: updated.length } });
+    await audit(c, {
+      action: selected ? 'photo.selected' : 'photo.deselected',
+      eventId,
+      metadata: { count: updated.length },
+    });
     return c.json({ updated: updated.length }, 200);
   },
 );
@@ -377,7 +391,7 @@ photoRoutes.openapi(
     tags: ['Photos'],
     summary: 'Delete a photo',
     description:
-      'Soft delete, restorable for 30 days. The event lead can delete anything; an uploader can ' +
+      'Removes a photo from event lists and galleries. Originals remain private in storage. The event lead can delete anything; an uploader can ' +
       'delete their own upload within 15 minutes of uploading it.',
     security: [{ sessionAuth: [] }],
     middleware: [sessionAuth()] as const,
@@ -386,40 +400,37 @@ photoRoutes.openapi(
   }),
   async (c) => {
     const { photoId } = c.req.valid('param');
-    const s = c.get('session')!;
-    const db = c.get('db');
-
-    const [row] = await db
-      .select({ photo: photos, role: eventMembers.role })
-      .from(photos)
-      .leftJoin(
-        eventMembers,
-        and(eq(eventMembers.eventId, photos.eventId), eq(eventMembers.userId, s.userId)),
-      )
-      .where(eq(photos.id, photoId))
-      .limit(1);
-
-    if (!row || !row.role) throw new AppError('NOT_FOUND', 'Photo not found.');
-
-    const isOwner = row.photo.uploadedBy === s.userId;
-    const withinWindow = Date.now() - row.photo.createdAt < SELF_DELETE_WINDOW_MS;
-    if (row.role !== 'admin' && !(isOwner && withinWindow)) {
-      throw new AppError(
-        'FORBIDDEN',
-        isOwner
-          ? 'You can only remove your own uploads within 15 minutes. Ask the event lead.'
-          : 'Only the event lead can remove other people’s photos.',
-      );
-    }
-
-    const now = Date.now();
-    await db
-      .update(photos)
-      .set({ status: 'deleted', deletedAt: now, isSelected: false, updatedAt: now })
-      .where(eq(photos.id, photoId));
-    await audit(c, { action: 'photo.deleted', eventId: row.photo.eventId, targetType: 'photo', targetId: photoId });
+    await deletePhotos(c, [photoId]);
 
     return c.body(null, 204);
+  },
+);
+
+photoRoutes.openapi(
+  createRoute({
+    method: 'post',
+    path: '/events/{eventId}/photos/delete',
+    tags: ['Photos'],
+    summary: 'Delete multiple photos',
+    description:
+      'Deletes up to 500 photos atomically. Leads may delete event photos; members may delete their own uploads within 15 minutes. Any missing or forbidden photo rejects the entire batch. Originals remain private in storage.',
+    security: [{ sessionAuth: [] }],
+    middleware: [sessionAuth(), requireEventRole('member')] as const,
+    request: {
+      params: z.object({ eventId: Ulid }),
+      body: { content: { 'application/json': { schema: DeletePhotosBody } } },
+    },
+    responses: {
+      200: ok(z.object({ deleted: z.number().int() }), 'Number of newly deleted photos.'),
+      ...authErrors,
+      404: err('One or more photos were not found in this event.'),
+      422: err('Invalid batch.'),
+    },
+  }),
+  async (c) => {
+    const { eventId } = c.req.valid('param');
+    const { photoIds } = c.req.valid('json');
+    return c.json({ deleted: await deletePhotos(c, photoIds, eventId) }, 200);
   },
 );
 

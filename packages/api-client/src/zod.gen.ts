@@ -477,6 +477,24 @@ export const zPatchApiV1PhotosByPhotoIdResponse = z.object({
   createdAt: z.number().int(),
 });
 
+export const zPostApiV1EventsByEventIdPhotosDeleteData = z.object({
+  photoIds: z
+    .array(z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/))
+    .min(1)
+    .max(500),
+});
+
+export const zPostApiV1EventsByEventIdPhotosDeleteParameterEventId = z
+  .string()
+  .regex(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+
+/**
+ * Number of newly deleted photos.
+ */
+export const zPostApiV1EventsByEventIdPhotosDeleteResponse = z.object({
+  deleted: z.number().int(),
+});
+
 export const zGetApiV1EventsByEventIdGalleriesParameterEventId = z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/);
 
 export const zGetApiV1EventsByEventIdGalleriesParameterLimit = z.number().int().gte(1).lte(100).default(24);

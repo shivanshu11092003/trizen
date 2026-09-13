@@ -65,6 +65,9 @@ import type {
   PatchApiV1PhotosByPhotoIdData,
   PatchApiV1PhotosByPhotoIdResponses,
   PatchApiV1PhotosByPhotoIdErrors,
+  PostApiV1EventsByEventIdPhotosDeleteData,
+  PostApiV1EventsByEventIdPhotosDeleteResponses,
+  PostApiV1EventsByEventIdPhotosDeleteErrors,
   GetApiV1EventsByEventIdGalleriesData,
   GetApiV1EventsByEventIdGalleriesResponses,
   GetApiV1EventsByEventIdGalleriesErrors,
@@ -466,7 +469,7 @@ export const postApiV1EventsByEventIdPhotosSelect = <ThrowOnError extends boolea
 
 /**
  * Delete a photo
- * Soft delete, restorable for 30 days. The event lead can delete anything; an uploader can delete their own upload within 15 minutes of uploading it.
+ * Removes a photo from event lists and galleries. Originals remain private in storage. The event lead can delete anything; an uploader can delete their own upload within 15 minutes of uploading it.
  */
 export const deleteApiV1PhotosByPhotoId = <ThrowOnError extends boolean = false>(
   options: Options<DeleteApiV1PhotosByPhotoIdData, ThrowOnError>,
@@ -494,6 +497,27 @@ export const patchApiV1PhotosByPhotoId = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     url: '/api/v1/photos/{photoId}',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+};
+
+/**
+ * Delete multiple photos
+ * Deletes up to 500 photos atomically. Leads may delete event photos; members may delete their own uploads within 15 minutes. Any missing or forbidden photo rejects the entire batch. Originals remain private in storage.
+ */
+export const postApiV1EventsByEventIdPhotosDelete = <ThrowOnError extends boolean = false>(
+  options: Options<PostApiV1EventsByEventIdPhotosDeleteData, ThrowOnError>,
+) => {
+  return (options.client ?? _heyApiClient).post<
+    PostApiV1EventsByEventIdPhotosDeleteResponses,
+    PostApiV1EventsByEventIdPhotosDeleteErrors,
+    ThrowOnError
+  >({
+    url: '/api/v1/events/{eventId}/photos/delete',
     ...options,
     headers: {
       'Content-Type': 'application/json',

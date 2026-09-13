@@ -34,12 +34,14 @@ export function PhotoImage({
   demo = false,
   publicSlug,
   variant = 'thumb',
+  aspectRatio,
 }: {
   photo: Photo;
   index?: number;
   demo?: boolean;
   publicSlug?: string;
   variant?: 'thumb' | 'preview';
+  aspectRatio?: string;
 }) {
   const holder = useRef<HTMLDivElement>(null);
   const [load, setLoad] = useState(index < 12);
@@ -64,7 +66,7 @@ export function PhotoImage({
       ref={holder}
       className={`photo-image ${ready ? 'is-ready' : ''} ${demo ? 'demo-crop' : ''}`}
       style={{
-        aspectRatio: photo.width && photo.height ? `${photo.width}/${photo.height}` : '3/2',
+        aspectRatio: aspectRatio ?? (photo.width && photo.height ? `${photo.width}/${photo.height}` : '3/2'),
         backgroundColor: photo.dominantColor ?? '#20252c',
         ...(demo
           ? {
@@ -79,7 +81,9 @@ export function PhotoImage({
         <img
           src={src}
           srcSet={
-            publicSlug ? undefined : `/img/thumb/${storagePath} 480w, /img/preview/${storagePath} 1600w`
+            publicSlug || variant === 'preview'
+              ? undefined
+              : `/img/thumb/${storagePath} 480w, /img/preview/${storagePath} 1600w`
           }
           sizes="(max-width: 700px) 50vw, 25vw"
           alt={photo.caption || photo.filename}

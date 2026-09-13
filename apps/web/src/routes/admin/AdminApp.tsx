@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -20,10 +20,7 @@ import {
   ArrowLeft,
   CalendarDays,
   Check,
-  ChevronDown,
-  CircleHelp,
   CloudUpload,
-  Ellipsis,
   GalleryHorizontalEnd,
   HardDrive,
   Image as ImageIcon,
@@ -32,22 +29,22 @@ import {
   Moon,
   Plus,
   Search,
-  Settings,
   SlidersHorizontal,
   Sun,
+  Trash2,
   UploadCloud,
   Users,
   X,
 } from 'lucide-react';
-import { api } from '../../lib/api';
+import { api, ApiError } from '../../lib/api';
 import { useAuthStore } from '../../stores/auth';
 import { useThemeStore } from '../../stores/theme';
 import type { EventMember, Photo } from '../../types';
+import { formatBytes } from '../../lib/format';
 import { PhotoImage } from '../../components/PhotoImage';
 import { UploadView } from './UploadView';
 import { GalleriesView } from './GalleriesView';
 
-const eventColors = ['#67e8f9', '#f2b84b', '#c084fc', '#fb7185'];
 function useEventId() {
   return useParams({ strict: false }).eventId as string | undefined;
 }
@@ -90,6 +87,7 @@ function AdminShell() {
   const user = useAuthStore((state) => state.user);
   const clear = useAuthStore((state) => state.clear);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { message } = AntApp.useApp();
   const [mobileMenu, setMobileMenu] = useState(false);
   const current = path.endsWith('/photos')
@@ -104,8 +102,17 @@ function AdminShell() {
             ? 'overview'
             : 'events';
 
+  useEffect(() => setMobileMenu(false), [path]);
   async function logout() {
-    await api.logout().catch(() => undefined);
+    try {
+      await api.logout();
+    } catch (error) {
+      if (!(error instanceof ApiError && error.status === 401)) {
+        message.error('Could not sign out. Please try again.');
+        return;
+      }
+    }
+    queryClient.clear();
     clear();
     message.success('Signed out');
     await navigate({ to: '/login' });
@@ -117,19 +124,18 @@ function AdminShell() {
         <div className="sidebar-brand">
           <Aperture />
           <span>Arc & Grain</span>
-          <button className="mobile-close" onClick={() => setMobileMenu(false)}>
+          <button aria-label="Close navigation" className="mobile-close" onClick={() => setMobileMenu(false)}>
             <X />
           </button>
         </div>
-        <div className="workspace-switch">
+        <div className="workspace-identity">
           <span className="avatar">{(user?.displayName ?? 'PS').slice(0, 2).toUpperCase()}</span>
           <div>
             <strong>{user?.displayName ?? 'Priya Studio'}</strong>
             <small>Studio workspace</small>
           </div>
-          <ChevronDown />
         </div>
-        <nav>
+        <nav aria-label="Workspace navigation">
           <p>Workspace</p>
           <Link to="/events" activeOptions={{ exact: true }} className={current === 'events' ? 'active' : ''}>
             <LayoutDashboard />
@@ -187,31 +193,32 @@ function AdminShell() {
           )}
         </nav>
         <div className="sidebar-bottom">
-          <a href="/redoc" target="_blank">
-            <CircleHelp />
-            API reference
-          </a>
           <button onClick={() => void logout()}>
             <LogOut />
             Sign out
           </button>
         </div>
       </aside>
+      {mobileMenu && (
+        <button
+          className="sidebar-backdrop"
+          aria-label="Dismiss navigation"
+          onClick={() => setMobileMenu(false)}
+        />
+      )}
       <main className="admin-main">
         <header className="admin-topbar">
-          <button className="mobile-menu" onClick={() => setMobileMenu(true)}>
+          <button
+            aria-label="Open navigation"
+            aria-expanded={mobileMenu}
+            className="mobile-menu"
+            onClick={() => setMobileMenu(true)}
+          >
             <SlidersHorizontal />
           </button>
-          <div className="global-search">
-            <Search />
-            <span>Search the workspace</span>
-            <kbd>/</kbd>
-          </div>
+          <span className="topbar-title">{eventQuery.data?.name ?? 'Your workspace'}</span>
           <div className="topbar-actions">
             <ThemeButton />
-            <button aria-label="Settings">
-              <Settings />
-            </button>
             <span className="topbar-avatar">{(user?.displayName ?? 'PS').slice(0, 2).toUpperCase()}</span>
           </div>
         </header>
@@ -249,13 +256,12 @@ function AdminShell() {
 }
 
 function ThemeButton() {
-  const preference = useThemeStore((state) => state.preference);
   const resolved = useThemeStore((state) => state.resolved);
   const setPreference = useThemeStore((state) => state.setPreference);
   return (
     <button
       aria-label={`Use ${resolved === 'dark' ? 'light' : 'dark'} theme`}
-      onClick={() => setPreference(preference === 'dark' ? 'light' : 'dark')}
+      onClick={() => setPreference(resolved === 'dark' ? 'light' : 'dark')}
     >
       {resolved === 'dark' ? <Sun /> : <Moon />}
     </button>
@@ -283,20 +289,30 @@ function PageHeading({
 }
 
 function EventsView() {
-  const { data, isLoading, error, refetch } = useQuery({ queryKey: ['events'], queryFn: () => api.events() });
+  const { data, isLoading, error, refetch, hasNextPage, fetchNextPage, isFetchingNextPage } =
+    useInfiniteQuery({
+      queryKey: ['events'],
+      initialPageParam: undefined as string | undefined,
+      queryFn: ({ pageParam }) => api.events(pageParam),
+      getNextPageParam: (last) => last.pageInfo.nextCursor ?? undefined,
+    });
   const navigate = useNavigate();
   const { notification } = AntApp.useApp();
   const [open, setOpen] = useState(false);
-  const events = data?.data ?? [];
+  const [saving, setSaving] = useState(false);
+  const events = data?.pages.flatMap((page) => page.data) ?? [];
   const canCreate = useAuthStore((state) => state.user?.isPlatformAdmin);
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving) return;
     const form = new FormData(event.currentTarget);
+    setSaving(true);
     try {
       const created = await api.createEvent({
         name: String(form.get('name')),
         description: String(form.get('description') ?? ''),
+        eventDate: form.get('date') ? new Date(`${form.get('date')}T12:00:00`).getTime() : undefined,
       });
       setOpen(false);
       await refetch();
@@ -306,6 +322,8 @@ function EventsView() {
         message: 'Event not created',
         description: caught instanceof Error ? caught.message : 'Try again.',
       });
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -337,26 +355,20 @@ function EventsView() {
       )}
       <div className="event-summary">
         <span>
-          <strong>{events.length}</strong> active events
+          <strong>{events.length}</strong> {events.length === 1 ? 'event' : 'events'}
         </span>
       </div>
       <section className="event-list" aria-busy={isLoading}>
-        {events.map((item, index) => (
+        {events.map((item) => (
           <Link key={item.id} to="/events/$eventId" params={{ eventId: item.id }} className="event-row">
-            <div
-              className="event-cover"
-              style={{
-                backgroundImage: 'url(/assets/wedding-contact-sheet.png)',
-                backgroundPosition: `${index * 33}% 0`,
-              }}
-            >
-              <span style={{ backgroundColor: eventColors[index % eventColors.length] }} />
+            <div className="event-cover" aria-hidden="true">
+              <CalendarDays />
             </div>
             <div className="event-primary">
               <h2>{item.name}</h2>
               <p>{item.description || 'No event note yet.'}</p>
             </div>
-            <div className="event-meta">
+            <div className="event-meta event-date">
               <span>Event date</span>
               <strong>
                 {item.eventDate
@@ -364,7 +376,7 @@ function EventsView() {
                   : 'Not set'}
               </strong>
             </div>
-            <div className="event-meta">
+            <div className="event-meta event-role">
               <span>Your role</span>
               <Tag color={item.role === 'admin' ? 'cyan' : 'default'}>
                 {item.role === 'admin' ? 'Lead' : 'Member'}
@@ -376,6 +388,11 @@ function EventsView() {
           </Link>
         ))}
       </section>
+      {hasNextPage && (
+        <button className="load-more" disabled={isFetchingNextPage} onClick={() => void fetchNextPage()}>
+          Load more events
+        </button>
+      )}
       <Modal title="Create an event" open={open} footer={null} onCancel={() => setOpen(false)}>
         <form className="modal-form" onSubmit={(event) => void create(event)}>
           <label>
@@ -386,7 +403,13 @@ function EventsView() {
             Short note
             <textarea name="description" rows={4} placeholder="What should the team know?" />
           </label>
-          <button className="primary-action">Create event</button>
+          <label>
+            Event date
+            <input name="date" type="date" />
+          </label>
+          <button className="primary-action" disabled={saving}>
+            {saving ? 'Creating…' : 'Create event'}
+          </button>
         </form>
       </Modal>
     </>
@@ -448,7 +471,7 @@ function OverviewView({ eventId }: { eventId: string }) {
         <div>
           <HardDrive />
           <span>Storage</span>
-          <strong>{(values.storageBytes / 1024 ** 2).toFixed(1)} MB</strong>
+          <strong>{formatBytes(values.storageBytes)}</strong>
           <small>Private originals</small>
         </div>
       </section>
@@ -480,6 +503,11 @@ function PhotosView({ eventId, canCurate }: { eventId: string; canCurate: boolea
   const [search, setSearch] = useState('');
   const [detail, setDetail] = useState<Photo | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [deletion, setDeletion] = useState<{ ids: string[]; filename?: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const userId = useAuthStore((state) => state.user?.id);
+  const canDelete = (photo: Photo) =>
+    canCurate || (photo.uploadedBy === userId && Date.now() - photo.createdAt < 15 * 60 * 1000);
   const queryClient = useQueryClient();
   const { message } = AntApp.useApp();
   const photosQuery = useInfiniteQuery({
@@ -505,6 +533,33 @@ function PhotosView({ eventId, canCurate }: { eventId: string; canCurate: boolea
     },
   });
 
+  async function confirmDeletion() {
+    if (!deletion || deleting) return;
+    setDeleting(true);
+    try {
+      if (deletion.filename) await api.deletePhoto(deletion.ids[0]!);
+      else await api.deletePhotos(eventId, deletion.ids);
+      const removed = new Set(deletion.ids);
+      setPicked((current) => new Set([...current].filter((id) => !removed.has(id))));
+      if (detail && removed.has(detail.id)) setDetail(null);
+      setDeletion(null);
+      await Promise.all([
+        ...['photos', 'stats', 'galleries', 'members'].map((key) =>
+          queryClient.invalidateQueries({ queryKey: [key, eventId] }),
+        ),
+        queryClient.invalidateQueries({ queryKey: ['gallery-teaser'] }),
+        queryClient.invalidateQueries({ queryKey: ['public-gallery'] }),
+      ]);
+      message.success(
+        deletion.ids.length === 1 ? 'Photograph deleted' : `${deletion.ids.length} photographs deleted`,
+      );
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Could not delete photographs. Try again.');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <>
       <PageHeading
@@ -523,6 +578,7 @@ function PhotosView({ eventId, canCurate }: { eventId: string; canCurate: boolea
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
+            aria-label="Search filenames"
             placeholder="Search filenames"
           />
         </div>
@@ -535,7 +591,7 @@ function PhotosView({ eventId, canCurate }: { eventId: string; canCurate: boolea
             { label: 'Unselected', value: 'unselected' },
           ]}
         />
-        <select value={sort} onChange={(event) => setSort(event.target.value)}>
+        <select aria-label="Sort photographs" value={sort} onChange={(event) => setSort(event.target.value)}>
           <option value="newest">Newest first</option>
           <option value="oldest">Oldest first</option>
           <option value="filename">Filename</option>
@@ -547,17 +603,43 @@ function PhotosView({ eventId, canCurate }: { eventId: string; canCurate: boolea
       {!photosQuery.isPending && !photosQuery.isError && photos.length === 0 && (
         <p>No photographs match. Upload photos to get started.</p>
       )}
+      {photos.some(canDelete) && (
+        <div className="photo-mark-actions">
+          <button
+            disabled={deleting || mutateSelection.isPending}
+            onClick={() =>
+              setPicked(
+                new Set(
+                  photos
+                    .filter(canDelete)
+                    .slice(0, 500)
+                    .map((photo) => photo.id),
+                ),
+              )
+            }
+          >
+            Mark all loaded
+          </button>
+          <span>Mark up to 500 photographs at a time.</span>
+        </div>
+      )}
       <PhotoGrid
         canCurate={canCurate}
+        canMark={canDelete}
+        disabled={deleting || mutateSelection.isPending}
         photos={photos}
         picked={picked}
-        onPick={(photo) =>
+        onPick={(photo) => {
+          if (!picked.has(photo.id) && picked.size >= 500) {
+            message.info('Mark up to 500 photographs at a time.');
+            return;
+          }
           setPicked((current) => {
             const next = new Set(current);
             next.has(photo.id) ? next.delete(photo.id) : next.add(photo.id);
             return next;
-          })
-        }
+          });
+        }}
         onOpen={setDetail}
       />
       {photosQuery.hasNextPage && (
@@ -569,39 +651,93 @@ function PhotosView({ eventId, canCurate }: { eventId: string; canCurate: boolea
           Load more photographs
         </button>
       )}
-      {canCurate && picked.size > 0 && (
+      {picked.size > 0 && (
         <div className="bulk-bar">
           <span>
             <strong>{picked.size}</strong> photographs marked
           </span>
+          {canCurate && (
+            <button
+              disabled={mutateSelection.isPending || deleting}
+              onClick={() =>
+                mutateSelection.mutate(
+                  { ids: [...picked], value: true },
+                  { onError: (error) => message.error(error.message) },
+                )
+              }
+            >
+              <Check />
+              Add to selection
+            </button>
+          )}
+          {canCurate && (
+            <button
+              disabled={mutateSelection.isPending || deleting}
+              onClick={() =>
+                mutateSelection.mutate(
+                  { ids: [...picked], value: false },
+                  { onError: (error) => message.error(error.message) },
+                )
+              }
+            >
+              Deselect
+            </button>
+          )}
           <button
-            onClick={() =>
-              mutateSelection.mutate(
-                { ids: [...picked], value: true },
-                { onError: (error) => message.error(error.message) },
-              )
-            }
+            className="danger-action"
+            disabled={deleting || mutateSelection.isPending}
+            onClick={() => setDeletion({ ids: [...picked] })}
           >
-            <Check />
-            Add to selection
+            <Trash2 />
+            Delete marked
           </button>
-          <button
-            onClick={() =>
-              mutateSelection.mutate(
-                { ids: [...picked], value: false },
-                { onError: (error) => message.error(error.message) },
-              )
-            }
-          >
-            Deselect
+          <button disabled={deleting} onClick={() => setPicked(new Set())}>
+            Clear
           </button>
-          <button onClick={() => setPicked(new Set())}>Clear</button>
         </div>
       )}
+      <Modal
+        title={deletion?.filename ? 'Delete photograph?' : `Delete ${deletion?.ids.length ?? 0} photographs?`}
+        open={Boolean(deletion)}
+        okText="Delete"
+        okButtonProps={{ danger: true, 'aria-label': 'Delete' }}
+        confirmLoading={deleting}
+        cancelButtonProps={{ disabled: deleting }}
+        closable={!deleting}
+        maskClosable={!deleting}
+        keyboard={!deleting}
+        onCancel={() => {
+          if (!deleting) setDeletion(null);
+        }}
+        onOk={() => void confirmDeletion()}
+      >
+        {deletion?.filename && <p className="delete-filename">{deletion.filename}</p>}
+        <p>
+          This removes the photographs from the event and all customer galleries. You cannot undo this in the
+          app.
+        </p>
+      </Modal>
       <Drawer width={480} title="Photograph details" open={Boolean(detail)} onClose={() => setDetail(null)}>
         {detail && (
           <>
-            <PhotoImage photo={detail} index={Number(detail.id.split('-').pop()) || 0} />
+            <PhotoImage photo={detail} variant="preview" />
+            {canDelete(detail) ? (
+              <button
+                className="delete-photo-action"
+                disabled={deleting || mutateSelection.isPending}
+                onClick={() => setDeletion({ ids: [detail.id], filename: detail.filename })}
+              >
+                <Trash2 />
+                Delete photograph
+              </button>
+            ) : (
+              !canCurate && (
+                <p className="muted">
+                  Members can delete their own uploads within 15 minutes. Ask your lead to remove older
+                  photographs.
+                </p>
+              )
+            )}
             <Descriptions
               column={1}
               size="small"
@@ -612,14 +748,13 @@ function PhotosView({ eventId, canCurate }: { eventId: string; canCurate: boolea
                 {
                   key: 'size',
                   label: 'File size',
-                  children: `${(detail.fileSize / 1024 ** 2).toFixed(1)} MB`,
+                  children: formatBytes(detail.fileSize),
                 },
                 {
                   key: 'dimensions',
                   label: 'Dimensions',
                   children: `${detail.width ?? '—'} × ${detail.height ?? '—'}`,
                 },
-                { key: 'storage', label: 'Storage key', children: detail.storageKey },
               ]}
             />
           </>
@@ -635,20 +770,31 @@ function PhotoGrid({
   onPick,
   onOpen,
   canCurate,
+  canMark,
+  disabled,
 }: {
   canCurate: boolean;
+  canMark: (photo: Photo) => boolean;
+  disabled: boolean;
   photos: Photo[];
   picked: Set<string>;
   onPick: (photo: Photo) => void;
   onOpen: (photo: Photo) => void;
 }) {
   const parent = useRef<HTMLDivElement>(null);
-  const columns = innerWidth < 640 ? 2 : innerWidth < 1050 ? 3 : 4;
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    if (!parent.current) return;
+    const observer = new ResizeObserver(([entry]) => setWidth(entry!.contentRect.width));
+    observer.observe(parent.current);
+    return () => observer.disconnect();
+  }, []);
+  const columns = width < 600 ? 2 : width < 900 ? 3 : 4;
   const rows = Math.ceil(photos.length / columns);
   const virtualizer = useVirtualizer({
     count: rows,
     getScrollElement: () => parent.current,
-    estimateSize: () => 280,
+    estimateSize: () => (((width - (columns - 1) * 8) / columns) * 2) / 3 + 44,
     overscan: 2,
   });
   return (
@@ -670,21 +816,27 @@ function PhotoGrid({
               const marked = picked.has(photo.id);
               return (
                 <article key={photo.id} className={`photo-tile ${marked ? 'is-picked' : ''}`}>
-                  <button className="photo-click" onClick={() => onOpen(photo)}>
-                    <PhotoImage photo={photo} index={index} />
+                  <button
+                    aria-label={`Open ${photo.filename}`}
+                    className="photo-click"
+                    onClick={() => onOpen(photo)}
+                  >
+                    <PhotoImage photo={photo} index={index} aspectRatio="3/2" />
                   </button>
-                  {canCurate && (
+                  {canMark(photo) && (
                     <button
-                      className={`select-dot ${marked || photo.isSelected ? 'selected' : ''}`}
-                      aria-label={`Select ${photo.filename}`}
+                      disabled={disabled}
+                      className={`${canCurate ? 'select-dot' : 'mark-dot'} ${marked || (canCurate && photo.isSelected) ? 'selected' : ''}`}
+                      aria-label={`${canCurate ? 'Select' : 'Mark'} ${photo.filename}`}
+                      aria-pressed={marked}
                       onClick={() => onPick(photo)}
                     >
-                      {marked || photo.isSelected ? <Check /> : null}
+                      {marked || (canCurate && photo.isSelected) ? <Check /> : null}
                     </button>
                   )}
                   <div className="photo-caption">
                     <span>{photo.filename}</span>
-                    <small>{(photo.fileSize / 1024 ** 2).toFixed(1)} MB</small>
+                    <small>{formatBytes(photo.fileSize)}</small>
                   </div>
                 </article>
               );
@@ -699,8 +851,16 @@ function PhotoGrid({
 function TeamView({ eventId }: { eventId: string }) {
   const { notification } = AntApp.useApp();
   const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const userId = useAuthStore((state) => state.user?.id);
   const [memberAccess, setMemberAccess] = useState<{ email: string; password: string } | null>(null);
-  const { data, refetch } = useQuery({ queryKey: ['members', eventId], queryFn: () => api.members(eventId) });
+  const { data, refetch, isPending, error, hasNextPage, fetchNextPage, isFetchingNextPage } =
+    useInfiniteQuery({
+      queryKey: ['members', eventId],
+      initialPageParam: undefined as string | undefined,
+      queryFn: ({ pageParam }) => api.members(eventId, pageParam),
+      getNextPageParam: (last) => last.pageInfo.nextCursor ?? undefined,
+    });
   const columns: TableColumnsType<EventMember> = [
     {
       title: 'Photographer',
@@ -722,36 +882,41 @@ function TeamView({ eventId }: { eventId: string }) {
         <Tag color={role === 'admin' ? 'cyan' : 'default'}>{role === 'admin' ? 'Lead' : 'Member'}</Tag>
       ),
     },
-    { title: 'Uploads', dataIndex: 'photoCount', sorter: true },
+    { title: 'Uploads', dataIndex: 'photoCount', sorter: (a, b) => a.photoCount - b.photoCount },
     {
       title: 'Added',
       dataIndex: 'addedAt',
       render: (value) => new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium' }).format(value),
     },
     {
-      title: '',
+      title: 'Actions',
       key: 'actions',
-      render: (_, row) => (
-        <Popconfirm
-          title="Remove this team member?"
-          description="Their access ends on the next request."
-          onConfirm={() =>
-            api
-              .removeMember(eventId, row.userId)
-              .then(() => refetch())
-              .catch((error) => notification.error({ message: error.message }))
-          }
-        >
-          <button className="icon-button">
-            <Ellipsis />
-          </button>
-        </Popconfirm>
-      ),
+      render: (_, row) =>
+        row.userId === userId ? (
+          <span className="muted">You</span>
+        ) : (
+          <Popconfirm
+            title="Remove this team member?"
+            description="Their access ends on the next request."
+            onConfirm={() =>
+              api
+                .removeMember(eventId, row.userId)
+                .then(() => refetch())
+                .catch((error) => notification.error({ message: error.message }))
+            }
+          >
+            <button className="remove-member" aria-label={`Remove ${row.displayName}`}>
+              Remove
+            </button>
+          </Popconfirm>
+        ),
     },
   ];
   async function invite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving) return;
     const form = new FormData(event.currentTarget);
+    setSaving(true);
     try {
       const member = await api.addMember(eventId, {
         email: String(form.get('email')),
@@ -773,6 +938,8 @@ function TeamView({ eventId }: { eventId: string }) {
         message: 'Could not add member',
         description: caught instanceof Error ? caught.message : 'Try again.',
       });
+    } finally {
+      setSaving(false);
     }
   }
   return (
@@ -787,9 +954,26 @@ function TeamView({ eventId }: { eventId: string }) {
           </button>
         }
       />
+      {error && (
+        <p role="alert">
+          {error.message} <button onClick={() => void refetch()}>Retry</button>
+        </p>
+      )}
       <section className="panel table-panel">
-        <Table rowKey="userId" dataSource={data?.data ?? []} columns={columns} pagination={false} sticky />
+        <Table
+          rowKey="userId"
+          dataSource={data?.pages.flatMap((page) => page.data) ?? []}
+          columns={columns}
+          pagination={false}
+          loading={isPending}
+          scroll={{ x: 650 }}
+        />
       </section>
+      {hasNextPage && (
+        <button className="load-more" disabled={isFetchingNextPage} onClick={() => void fetchNextPage()}>
+          Load more members
+        </button>
+      )}
       <Modal title="Add a team member" open={open} footer={null} onCancel={() => setOpen(false)}>
         <form className="modal-form" onSubmit={(event) => void invite(event)}>
           <label>
@@ -807,7 +991,9 @@ function TeamView({ eventId }: { eventId: string }) {
               <option value="admin">Lead — curate and publish</option>
             </select>
           </label>
-          <button className="primary-action">Add to event</button>
+          <button className="primary-action" disabled={saving}>
+            {saving ? 'Adding…' : 'Add to event'}
+          </button>
         </form>
       </Modal>
       <Modal
@@ -817,7 +1003,7 @@ function TeamView({ eventId }: { eventId: string }) {
         footer={null}
       >
         {memberAccess && (
-          <div className="credentials">
+          <div className="credentials member-credentials">
             <p>Share these details with the member. The password is shown only now.</p>
             <label>
               Email<strong>{memberAccess.email}</strong>

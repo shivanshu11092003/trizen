@@ -42,7 +42,17 @@ mapping and remaining submission item are in [docs/requirements.md](docs/require
 
 Unpublishing a gallery blocks both its photo list and image endpoints. Resetting
 its PIN invalidates the old PIN and existing customer sessions. A published
-snapshot remains unchanged when a lead changes the event's selection later.
+snapshot remains unchanged when a lead changes the event's selection later. Deleting a
+photo removes it from the event and every customer gallery, including downloads;
+gallery counts and cover references update accordingly.
+
+To delete one photo, open its preview and choose **Delete photograph**. For a
+batch, mark the photographs (or use **Mark all loaded**) and choose **Delete marked**.
+Both actions ask for confirmation. Batches contain up to 500 photos and either
+succeed entirely or change nothing. Leads may delete any event photo; members
+may delete only their own uploads within 15 minutes. Deletion uses the existing
+soft-delete model: originals remain in private storage, and there is no restore
+or permanent-purge action in the UI.
 
 ## Technology choices
 
@@ -219,7 +229,7 @@ events, uploads actual images, verifies the entire lead/member/customer workflow
 and cleans up its own records and objects. With `pnpm dev` running,
 `pnpm test:e2e:live` also exercises registration, event creation, member invitation,
 real multi-file uploads, an interrupted transfer and retry, selection, custom-PIN
-publishing, customer browsing, locking and unpublishing through the browser.
+publishing, customer browsing, single/bulk deletion, locking and unpublishing through the browser.
 To run that browser workflow against the deployed application:
 
 ```bash

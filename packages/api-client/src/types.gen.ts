@@ -1695,6 +1695,91 @@ export type PatchApiV1PhotosByPhotoIdResponses = {
 export type PatchApiV1PhotosByPhotoIdResponse =
   PatchApiV1PhotosByPhotoIdResponses[keyof PatchApiV1PhotosByPhotoIdResponses];
 
+export type PostApiV1EventsByEventIdPhotosDeleteData = {
+  body?: {
+    photoIds: Array<string>;
+  };
+  path: {
+    eventId: string;
+  };
+  query?: never;
+  url: '/api/v1/events/{eventId}/photos/delete';
+};
+
+export type PostApiV1EventsByEventIdPhotosDeleteErrors = {
+  /**
+   * Not signed in, or the session was revoked.
+   */
+  401: {
+    error: {
+      code: string;
+      message: string;
+      details?: Array<{
+        path: string;
+        message: string;
+      }>;
+      requestId: string;
+    };
+  };
+  /**
+   * Signed in, but not allowed to do this.
+   */
+  403: {
+    error: {
+      code: string;
+      message: string;
+      details?: Array<{
+        path: string;
+        message: string;
+      }>;
+      requestId: string;
+    };
+  };
+  /**
+   * One or more photos were not found in this event.
+   */
+  404: {
+    error: {
+      code: string;
+      message: string;
+      details?: Array<{
+        path: string;
+        message: string;
+      }>;
+      requestId: string;
+    };
+  };
+  /**
+   * Invalid batch.
+   */
+  422: {
+    error: {
+      code: string;
+      message: string;
+      details?: Array<{
+        path: string;
+        message: string;
+      }>;
+      requestId: string;
+    };
+  };
+};
+
+export type PostApiV1EventsByEventIdPhotosDeleteError =
+  PostApiV1EventsByEventIdPhotosDeleteErrors[keyof PostApiV1EventsByEventIdPhotosDeleteErrors];
+
+export type PostApiV1EventsByEventIdPhotosDeleteResponses = {
+  /**
+   * Number of newly deleted photos.
+   */
+  200: {
+    deleted: number;
+  };
+};
+
+export type PostApiV1EventsByEventIdPhotosDeleteResponse =
+  PostApiV1EventsByEventIdPhotosDeleteResponses[keyof PostApiV1EventsByEventIdPhotosDeleteResponses];
+
 export type GetApiV1EventsByEventIdGalleriesData = {
   body?: never;
   path: {

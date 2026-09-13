@@ -3,7 +3,11 @@ import { persist } from 'zustand/middleware';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 const resolve = (preference: ThemePreference): 'light' | 'dark' =>
-  preference === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : preference;
+  preference === 'system'
+    ? matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark'
+      : 'light'
+    : preference;
 
 type ThemeState = {
   preference: ThemePreference;
@@ -18,11 +22,20 @@ export const useThemeStore = create<ThemeState>()(
       resolved: resolve('system'),
       setPreference: (preference) => set({ preference, resolved: resolve(preference) }),
     }),
-    { name: 'trizen-theme', partialize: (state) => ({ preference: state.preference }) },
+    {
+      name: 'trizen-theme',
+      partialize: (state) => ({ preference: state.preference }),
+      onRehydrateStorage: () => (state) => {
+        if (state) state.setPreference(state.preference);
+      },
+    },
   ),
 );
 
-useThemeStore.subscribe((state) => { document.documentElement.dataset.theme = state.resolved; });
+document.documentElement.dataset.theme = useThemeStore.getState().resolved;
+useThemeStore.subscribe((state) => {
+  document.documentElement.dataset.theme = state.resolved;
+});
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
   const state = useThemeStore.getState();
   if (state.preference === 'system') state.setPreference('system');

@@ -60,6 +60,7 @@ test('live lead, member and customer workflow', async ({ browser, baseURL }) => 
     await member.getByLabel('Choose photographs').setInputFiles([
       { name: 'first.png', mimeType: 'image/png', buffer: png },
       { name: 'second.png', mimeType: 'image/png', buffer: png },
+      { name: 'third.png', mimeType: 'image/png', buffer: png },
     ]);
     let failedOnce = false;
     await member.route('**/storage/v1/object/upload/sign/**', (route) => {
@@ -70,15 +71,15 @@ test('live lead, member and customer workflow', async ({ browser, baseURL }) => 
       return route.continue();
     });
     await member.getByRole('button', { name: 'Start upload', exact: true }).click();
-    await expect(member.getByText('1 of 2 ready', { exact: true })).toBeVisible({ timeout: 60_000 });
+    await expect(member.getByText('2 of 3 ready', { exact: true })).toBeVisible({ timeout: 60_000 });
     await member.getByRole('button', { name: 'Retry unfinished uploads', exact: true }).click();
-    await expect(member.getByText('2 of 2 ready', { exact: true })).toBeVisible({ timeout: 60_000 });
+    await expect(member.getByText('3 of 3 ready', { exact: true })).toBeVisible({ timeout: 60_000 });
     await member.getByRole('link', { name: 'View photographs', exact: true }).click();
-    await expect(member.locator('.photo-tile')).toHaveCount(2);
+    await expect(member.locator('.photo-tile')).toHaveCount(3);
     await expect(member.locator('.select-dot')).toHaveCount(0);
 
     await lead.goto(`${baseURL}/events/${eventId}/photos`);
-    await expect(lead.locator('.photo-tile')).toHaveCount(2);
+    await expect(lead.locator('.photo-tile')).toHaveCount(3);
     await lead.getByRole('button', { name: 'Select first.png', exact: true }).click();
     await lead.getByRole('button', { name: 'Add to selection', exact: true }).click();
     await expect(lead.getByText('Selection updated', { exact: true })).toBeVisible();
@@ -102,9 +103,32 @@ test('live lead, member and customer workflow', async ({ browser, baseURL }) => 
     await customer.getByRole('textbox').fill('482917');
     await customer.getByRole('button', { name: 'Enter gallery' }).click();
     await expect(customer.locator('.masonry-item')).toHaveCount(1);
-    await expect(customer.locator('.photo-image.is-ready img')).toBeVisible();
+    await expect(customer.locator('.photo-image.is-ready img')).toBeVisible({ timeout: 30_000 });
     await customer.getByRole('button', { name: 'Lock gallery', exact: true }).click();
     await expect(customer.getByText('Private collection')).toBeVisible();
+    // Delete one original through its preview, then a real multi-photo batch.
+    await lead.goto(`${baseURL}/events/${eventId}/photos`);
+    await lead.getByRole('button', { name: 'Open third.png', exact: true }).click();
+    await lead.getByRole('button', { name: 'Delete photograph', exact: true }).click();
+    await lead
+      .getByRole('dialog', { name: 'Delete photograph?', exact: true })
+      .getByRole('button', { name: 'Delete', exact: true })
+      .click();
+    await expect(lead.locator('.photo-tile')).toHaveCount(2);
+    await lead.getByRole('button', { name: 'Mark all loaded', exact: true }).click();
+    await lead.getByRole('button', { name: 'Delete marked', exact: true }).click();
+    await lead
+      .getByRole('dialog', { name: 'Delete 2 photographs?', exact: true })
+      .getByRole('button', { name: 'Delete', exact: true })
+      .click();
+    await expect(lead.locator('.photo-tile')).toHaveCount(0);
+    await customer.reload();
+    await expect(customer.getByText('A story in 0 photographs')).toBeVisible();
+    await customer.getByRole('textbox').fill('482917');
+    await customer.getByRole('button', { name: 'Enter gallery' }).click();
+    await expect(customer.getByText('No photographs are currently available.', { exact: false })).toBeVisible();
+    await expect(customer.locator('.masonry-item')).toHaveCount(0);
+    await lead.goto(`${baseURL}/events/${eventId}/galleries`);
     await lead.getByRole('button', { name: 'Unpublish', exact: true }).click();
     await expect(lead.getByText('unpublished', { exact: true })).toBeVisible();
     await customer.reload();
