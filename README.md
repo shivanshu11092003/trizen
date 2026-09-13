@@ -1,272 +1,244 @@
-# Arc & Grain
+# Arc & Grain — Photo Sharing Platform
 
-## What this is
+A photography team uploads images to an event, its lead selects a collection,
+and a customer opens the published gallery with a link and a six-digit PIN.
+Customers do not register or sign in to a team account.
 
-Arc & Grain is a private photo-delivery platform for event photography teams.
-Photographers upload directly to object storage, a lead reviews and selects the
-story, and a client receives a gallery link plus a six-digit PIN—no customer
-account or signup flow.
+## Submission links and demo access
 
-The repository is a strict pnpm monorepo: a Hono Worker backed by Supabase
-Postgres and private Supabase Storage, a route-split React 19 application, shared Zod contracts and concurrency
-primitives, and a generated Hey API client. The operational interface is dense
-and fast; the client interface is intentionally quiet and photograph-led.
+- Source repository: https://github.com/shivanshu11092003/trizen
+- Local application: http://localhost:5173
+- Local customer gallery: http://localhost:5173/gallery/arjun-priya-2026-demo
+- Gallery PIN: `274913`
+- Demo lead: `admin@demo.trizen.dev` / `TrizenDemo!2026`
+- Demo member: `member1@demo.trizen.dev` / `TrizenDemo!2026`
+- Live application: https://photos-api.shivanshugupta1109.workers.dev
+- Live customer gallery: https://photos-api.shivanshugupta1109.workers.dev/gallery/arjun-priya-2026-demo
 
-## Live demo
+The public lead/member/customer workflow was verified on September 13, 2026,
+including actual uploads, interrupted-upload retry, publishing and PIN access.
 
-A Cloudflare account has not been connected in this checkout, so there is no
-public deployment URL yet. The complete local demo is available at
-`http://localhost:5173` after setup.
+These demo accounts are public test fixtures. Supabase credentials, connection
+strings, API keys, and application signing secrets belong in the ignored `.env`
+file or Cloudflare/GitHub secrets, never in Git.
 
-| Audience | Credential |
-|---|---|
-| Lead | `admin@demo.trizen.dev` / `TrizenDemo!2026` |
-| Member | `member1@demo.trizen.dev` / `TrizenDemo!2026` |
-| Gallery | printed by `pnpm db:seed`; PIN `274913` |
+The challenge deadline is September 20, 2026 at 11:59 PM IST. The requirement
+mapping and remaining submission item are in [docs/requirements.md](docs/requirements.md).
 
-Fast review: sign in as the lead → open **Arjun & Priya Wedding** → review
-**Photographs** → open **Galleries** → visit the published client link. Without a
-local Worker, `/events` and `/gallery/arjun-priya-demo` intentionally expose a
-visual demo; use PIN `274913`.
+## Roles and workflow
 
-## Tech stack & why
+1. Register a lead account, or sign in as the demo lead.
+2. Create an event and use **Team → Add member**. For a new member, copy the
+   one-time temporary password shown in the sign-in details dialog and give it to them.
+3. The member signs in, opens an assigned event and uploads multiple photographs.
+   Members can browse their own uploads. Only leads can select photos, manage
+   team access, or publish galleries. These rules are enforced by the API as
+   well as the interface.
+4. The lead opens **Photographs**, marks photos, and adds them to the selection.
+5. Under **Galleries → New gallery**, enter a title and a six-digit PIN, or leave
+   the PIN blank to generate one. Publish immediately or save a draft.
+6. Copy the link and PIN. Customers enter the PIN, browse the published photos,
+   and optionally download them. **Lock gallery** ends their gallery session.
 
-- Cloudflare Workers and Hono run the API while Drizzle talks to Supabase
-  Postgres through Supavisor's transaction pooler. Supabase Storage holds the
-  private originals; photo bytes never enter Postgres or pass through uploads on the Worker.
-- Server-side opaque sessions give immediate revocation. JWT stateless
-  verification would save no read because every useful request already resolves
-  event membership, while it would add refresh rotation and delayed revocation.
-- React 19, Vite, TanStack Router/Query/Virtual, and Zustand separate server data,
-  navigation, large-grid rendering, and small client-only preferences.
-- Ant Design earns its weight in the internal roster, manifest, drawers, and
-  publishing workflow. The public gallery owns lightweight components and loads
-  no Ant Design code. `vite build` emits distinct `admin-kit` and `gallery-kit`
-  chunks.
-- Zod → Hono OpenAPI → `docs/openapi.json` → Hey API makes the executable
-  contract the source for frontend types and query helpers.
+Unpublishing a gallery blocks both its photo list and image endpoints. Resetting
+its PIN invalidates the old PIN and existing customer sessions. A published
+snapshot remains unchanged when a lead changes the event's selection later.
 
-## Architecture
+## Technology choices
+
+- **React 19, Vite, TypeScript:** route-split frontend with a responsive team
+  workspace and a separate, lightweight customer gallery.
+- **Hono on Cloudflare Workers:** validated API routes, cookie sessions, and
+  static frontend hosting under one HTTPS origin. No separate Pages project
+  or cross-origin authentication configuration is needed.
+- **Supabase PostgreSQL and Drizzle:** relational event membership, photo
+  metadata, gallery snapshots, sessions, and audit records. Transaction pooler
+  connections disable prepared statements and are scoped to each Worker request.
+- **Private Supabase Storage:** originals are uploaded using signed URLs.
+  Image bytes are never stored in PostgreSQL. Thumbnails use transformations,
+  falling back to an authenticated original if resizing is unavailable.
+- **TanStack Query/Router/Virtual, Zustand, Ant Design:** data fetching, routing,
+  virtualization, local UI preferences and team controls. Identity is not persisted
+  in browser local storage.
+- **Zod, OpenAPI, Hey API:** runtime input validation and generated frontend
+  types/client. `docs/openapi.json` is generated from API routes.
+
+## Architecture and database
 
 ```mermaid
 flowchart LR
-  Browser --> Edge[Cloudflare edge]
-  Edge --> Pages[Pages SPA]
-  Edge --> Worker[Hono Worker]
-  Worker --> DB[(Supabase Postgres)]
-  Worker --> Storage[(Private Supabase Storage)]
-  Storage --> Resize[Supabase image transforms]
-  Resize --> CDN[Edge cache]
+  Browser --> Worker[Cloudflare Worker: React assets and Hono API]
+  Worker --> DB[(Supabase PostgreSQL)]
+  Worker --> Storage[Private Supabase Storage]
+  Browser -->|Signed upload URL| Storage
+  Storage -->|Authenticated images| Worker
 ```
 
-Upload and gallery-unlock sequence diagrams are in
-[docs/architecture.md](docs/architecture.md). The Worker and Pages app share one
-origin. That makes session cookies first-party and eliminates CORS entirely.
+`users` and `sessions` authenticate the team. `events` and `event_members` define
+access and the lead/member role. `photos` stores IDs, event/uploader IDs, filename,
+storage key, MIME type, byte size, dimensions, timestamps and curation state.
+`galleries` stores publication state and a hashed PIN; `gallery_photos` stores
+its ordered snapshot. `gallery_sessions`, `pin_attempts`, `rate_limits` and
+`audit_log` support customer access and security.
 
-## Database design
+The migration in `supabase/migrations` creates the tables, indexes, row-level
+security, and private `photos-originals` bucket. There are no browser table
+policies; application access goes through the API. Foreign keys and event-scoped
+queries keep photos and galleries attached to their owning event. Gallery and
+snapshot creation happens in one database transaction.
 
-```mermaid
-erDiagram
-  USERS ||--o{ SESSIONS : owns
-  USERS ||--o{ EVENT_MEMBERS : joins
-  EVENTS ||--o{ EVENT_MEMBERS : authorizes
-  EVENTS ||--o{ PHOTOS : contains
-  EVENTS ||--o{ GALLERIES : publishes
-  GALLERIES ||--o{ GALLERY_PHOTOS : snapshots
-  PHOTOS ||--o{ GALLERY_PHOTOS : appears_in
-  GALLERIES ||--o{ GALLERY_SESSIONS : unlocks
-  GALLERIES ||--o{ PIN_ATTEMPTS : protects
-  EVENTS ||--o{ AUDIT_LOG : records
-```
+## Local setup with hosted Supabase
 
-ULIDs remain sortable when timestamps tie. Epoch milliseconds use PostgreSQL
-`bigint` columns and remain numbers at the API boundary. `event_members` is the authorization
-spine; missing membership returns 404 so event existence is not leaked.
-`gallery_photos` is an immutable publication snapshot: later curation changes do
-not silently alter a delivery the client already received. Composite index
-order matches every supported keyset sort exactly.
-
-Foreign keys cascade when a true aggregate owner is deleted (event → photos,
-gallery → snapshot/session/attempts). Human authors referenced by retained
-audit/content rows use an explicit retained or nullable policy.
-
-## Cursor pagination
-
-Offset pagination is both unstable under concurrent uploads and increasingly
-expensive deep into a shoot. Lists instead use a signed keyset cursor containing
-`{ v, k, d, s }`: version, sort-key tuple, direction, and sort fingerprint. An
-HMAC rejects tampering, and the fingerprint rejects replay against a different
-sort. Tenancy predicates are never encoded in or derived from the cursor.
-
-The common path is:
-
-```sql
-SELECT * FROM photos
-WHERE event_id = ? AND status = 'ready'
-  AND (created_at, id) < (?, ?)
-ORDER BY created_at DESC, id DESC
-LIMIT ?; -- requested limit + 1
-```
-
-Previous-page traversal flips the comparison and order, then reverses the rows
-in application code. Nullable EXIF capture time gets an explicit null bucket.
-
-| Depth | OFFSET work | Keyset work |
-|---:|---:|---:|
-| 0 | 24 rows | indexed seek + 25 rows |
-| 600 | 624 rows walked | indexed seek + 25 rows |
-| 1,250 | 1,250 rows walked | indexed seek + final page |
-
-The table describes algorithmic row work; measure actual Supabase Postgres timings after the
-production dataset is deployed rather than presenting local figures as
-edge benchmarks.
-
-## API reference
-
-The committed contract is [docs/openapi.json](docs/openapi.json). With the
-Worker running, Swagger UI is at `/docs`, Redoc is at `/redoc`, and the live
-document is `/api/v1/openapi.json`.
-
-| Area | Authentication | Important failures |
-|---|---|---|
-| Auth and sessions | team cookie after login | 401, 403, 429 |
-| Events, members, photos | team cookie + event membership | 400 cursor, 404 cross-event, 422 |
-| Gallery administration | event lead | 403 member, 404 |
-| Client gallery | link; then path-scoped gallery cookie | 401 PIN/session, 410 expired, 429 lockout |
-| Media | authorized team/gallery path | 401, 404 |
-
-Every route uses one error envelope with a stable code, user-facing message,
-field details, and request ID. OpenAPI is generated from the same Zod schemas
-that validate requests.
-
-## UI approach
-
-The shared token layer defines ink, paper, cyan selection, amber warnings,
-spacing, radius, and type. Admin reads as a nightroom instrument: compact rows,
-continuous statistic strips, explicit server-side sorting, and virtualized photo
-rows. Ant tables always set `pagination={false}` because page numbers would
-reintroduce offset semantics.
-
-The gallery reads as an exhibition: Cormorant display type, near-black
-background, uneven editorial rhythm, and minimal chrome. A single shared
-IntersectionObserver gates image loading; stored dimensions reserve space before
-bytes arrive, and images reveal only after decode. The generated demo contact
-sheet lives at `apps/web/public/assets/wedding-contact-sheet.png`.
-
-Server data stays in TanStack Query. Zustand holds only auth render state (never
-persisted), theme preference (persisted), and UI-local concerns. The inline
-pre-paint script and theme store use the same `trizen-theme` key.
-
-## Security model
-
-| Threat | Control |
-|---|---|
-| Cross-event access | `event_members` checked server-side on every operation |
-| Stale access | server session row or membership removal applies next request |
-| Session theft | 256-bit opaque cookie token; only SHA-256 token hash stored |
-| Session fixation | a fresh session ID is minted at every login |
-| CSRF | Strict team cookie, Origin/Sec-Fetch-Site, double-submit token |
-| PIN guessing | PBKDF2, constant-time compare, per-gallery/IP Postgres window |
-| Gallery replay | per-gallery path cookie plus server-side gallery ID check |
-| Direct objects | Supabase bucket is private; every read traverses an authorization route |
-| Direct table access | RLS enabled with no browser policies; only the Worker service role queries app tables |
-| Unpublished content | public queries join the published snapshot |
-| XSS | React escaping, security headers, no dangerous HTML rendering |
-| Secret leakage | `.dev.vars` and `.env*` ignored; production uses Worker secrets |
-
-The team cookie is `HttpOnly; Secure; SameSite=Strict; Path=/` with a browser-
-enforced `__Host-` prefix in HTTPS. Gallery cookies intentionally use
-`SameSite=Lax` so an email/WhatsApp link works, and trade the prefix for a
-gallery-specific `Path`. Session revocation is deletion, not a flag or denylist.
-
-## Local setup
-
-Requirements: Node 20+, pnpm 11, Docker with roughly 8 GB available, and the
-Supabase CLI installed through this workspace. Docker is only needed for the
-local Supabase stack.
+Use Node **22.12+**, pnpm **11.3.0**, and a Supabase project. Docker is not needed
+when using hosted Supabase.
 
 ```bash
 pnpm install
-pnpm --filter api supabase:start
-pnpm --filter api env:local
+cp .env.example .env
+```
+
+Fill the root `.env` with your own project values. The API's setup scripts read
+that file and generate `apps/api/.dev.vars` for Wrangler. The root `.env` takes
+precedence over an older `.dev.vars`; process environment variables take highest
+precedence for CI.
+
+```bash
+pnpm --filter api db:migrate:remote
 pnpm db:seed
 pnpm dev
 ```
 
-`supabase:start` applies `supabase/migrations` automatically. Use
-`pnpm db:migrate` when you intentionally want to reset and rebuild the local
-database; that command deletes existing local Supabase data.
+The migration command uses `DATABASE_URL` directly; there is no project reference
+placeholder to substitute and no separate CLI linking step. Seeding creates the
+demo users, event, 1,250 photo records, 600-photo gallery, and actual JPEG objects
+based on the six checked-in sample images. To repair an older metadata-only seed:
 
-For a hosted Supabase project instead, copy `.env.example` to
-`apps/api/.dev.vars`, fill in the project URL, service-role key, and transaction
-pooler URI, then run `pnpm --filter api db:migrate:remote` before seeding.
+```bash
+pnpm --filter api db:seed:images
+```
 
-The API runs on `http://localhost:8787`; Vite runs on
-`http://localhost:5173` and proxies `/api` and `/img`.
+This repair preserves existing storage objects and targets only known demo rows.
+
+Open http://localhost:5173. The API is at http://localhost:8787, with `/health`
+for liveness and `/ready` for database plus storage readiness. Vite proxies `/api`
+and `/img` to the Worker. API documentation is at http://localhost:8787/docs.
+
+For an entirely local Supabase stack, install Docker, leave the hosted `.env`
+out of this checkout, then run:
+
+```bash
+pnpm supabase:start
+pnpm env:local
+pnpm db:seed
+pnpm dev
+```
+
+`pnpm db:migrate` resets the **local** database and deletes its existing data.
+Use `db:migrate:remote` to apply pending migrations to the configured hosted DB.
 
 ## Environment variables
 
-| Name | Used for | Development | Production |
-|---|---|---|---|
-| `CURSOR_SECRET` | HMAC cursor signing | `openssl rand -base64 32` | Worker secret |
-| `PIN_PEPPER` | reserved PIN hardening | random 32 bytes | Worker secret |
-| `IP_HASH_PEPPER` | irreversible IP fingerprints | random 32 bytes | Worker secret |
-| `DATABASE_URL` | Supabase Postgres | local CLI URI | transaction pooler URI, port 6543 |
-| `SUPABASE_URL` | Storage API | local CLI URL | project URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | server-only database/storage authority | local CLI key | Worker secret |
-| `SUPABASE_STORAGE_BUCKET` | private originals | `photos-originals` | private bucket name |
-| `PUBLIC_ORIGIN` | CSRF origin and gallery URLs | localhost | canonical HTTPS origin |
-| `DOCS_ENABLED` | Swagger/Redoc gate | `true` | normally `false` |
+| Variable | Value / purpose |
+|---|---|
+| `DATABASE_URL` | Supabase PostgreSQL transaction pooler URI, port 6543; URL-encode special characters in the password |
+| `SUPABASE_URL` | Your Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-only service-role JWT or supported secret API key |
+| `SUPABASE_STORAGE_BUCKET` | `photos-originals`; a bucket name, not an S3 endpoint URL |
+| `CURSOR_SECRET` | Random secret for signing pagination cursors |
+| `IP_HASH_PEPPER` | Random secret for hashing IP addresses |
+| `PIN_PEPPER` | Server secret used to HMAC passwords and PINs before salted PBKDF2 hashing |
+| `PUBLIC_ORIGIN` | `http://localhost:5173` locally; production defaults to the incoming Worker origin |
+| `DOCS_ENABLED` | `true` locally; production Worker configuration sets `false` |
 
-Never copy `.dev.vars` into a deployment or commit it.
+Generate each secret independently with `openssl rand -base64 32`. Do not put
+backend secrets in `VITE_*` variables or frontend code. Keep `PIN_PEPPER` stable
+for the lifetime of existing password and PIN hashes; replacing it requires
+resetting those credentials. Local environment generation preserves existing secrets.
 
-## Deployment
+## Deployment: frontend and API on one Cloudflare Worker
 
-1. Create a Supabase project and save its transaction-pooler URI, project URL,
-   and service-role key.
-2. Apply `supabase/migrations` with `pnpm --filter api db:migrate:remote`.
-3. Add `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
-   `SUPABASE_STORAGE_BUCKET`, and the application peppers as Worker secrets.
-4. Route the Worker to `/api/*`, `/img/*`, `/docs`, and `/redoc` on the Pages
-   custom domain.
-5. Apply migrations, deploy the Worker, then deploy `apps/web/dist` to Pages.
-6. Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` to GitHub Actions.
+The production configuration in `apps/api/wrangler.toml` includes the built React
+assets, SPA routing and API routes. First connect Cloudflare:
 
-The checked-in workflow verifies types, tests, builds, code generation freshness,
-and public-gallery import boundaries before applying remote migrations/deploying
-on `main`.
+```bash
+pnpm --filter api exec wrangler login
+pnpm deploy
+```
 
-## Testing
+`pnpm deploy` builds the frontend and API, applies pending database migrations,
+loads backend secrets into the production Worker, then deploys both the frontend
+and API. Supabase remains the database and storage service. Save Wrangler's
+public `https://photos-api.<account-subdomain>.workers.dev` URL in the submission
+links above and verify its `/ready` endpoint. Customers use this origin plus their
+gallery path. Demo access is available if the configured database was seeded.
+
+For CI, configure the GitHub `production` environment with `CLOUDFLARE_API_TOKEN`,
+`CLOUDFLARE_ACCOUNT_ID` and all seven backend variables listed in
+`apps/api/scripts/environment.mjs`. The workflow verifies types, unit tests,
+browser tests, builds, generated contracts and a workflow against local Supabase
+before deploying a push to `main`.
+
+## Security and failure handling
+
+- HMAC-SHA256 with a server pepper, followed by salted PBKDF2-SHA256 at 100,000
+  iterations (the production Worker limit), protects password/PIN hashes.
+  Opaque, revocable session tokens are stored as hashes. HTTPS team cookies
+  are HttpOnly and Secure.
+- Event membership and role checks on every protected API operation. Members'
+  photo lists and image access are restricted to their own event uploads.
+- CSRF origin and double-submit token checks for authenticated mutations.
+- Signed, private uploads with MIME type, file-size and batch validation.
+  Confirmation verifies stored object size/type before making a photo ready.
+- Four concurrent browser uploads; successful files remain ready if another
+  fails, and unfinished uploads can be retried without reuploading completed ones.
+- PIN attempt limits; customer image and list endpoints require a valid gallery
+  session and a currently published, unexpired gallery.
+- Unknown and inaccessible events are hidden with 404 responses. Invalid input
+  uses a consistent 422 error envelope with field details and a request ID.
+- Missing storage objects show a clear unavailable-image state.
+
+## Tests and verification
 
 ```bash
 pnpm typecheck
 pnpm test
+pnpm test:e2e
+pnpm test:integration
+pnpm test:e2e:live
 pnpm build
 pnpm gen:api
 ```
 
-Shared tests cover cursor signature/fingerprint behavior and bounded async
-primitives. API tests cover PBKDF2 verification, token entropy, sortable IDs,
-and PIN shape. Use a local or hosted Supabase project for real
-upload/download tests. Generated infinite-query options are verified by
-`scripts/verify-codegen.mjs`.
+Unit tests cover security primitives, pagination, concurrency, and storage error
+handling. Browser tests cover login gating, member controls, required PIN entry,
+locking, missing images, and responsive layouts using deterministic API fixtures.
 
-## Known limitations & what I would do next
+`test:integration` starts an isolated local Worker on port 8799 and uses the
+Supabase project configured in the environment. It creates unique test users and
+events, uploads actual images, verifies the entire lead/member/customer workflow,
+and cleans up its own records and objects. With `pnpm dev` running,
+`pnpm test:e2e:live` also exercises registration, event creation, member invitation,
+real multi-file uploads, an interrupted transfer and retry, selection, custom-PIN
+publishing, customer browsing, locking and unpublishing through the browser.
+To run that browser workflow against the deployed application:
 
-- This checkout is not connected to Cloudflare or a hosted Supabase project, so
-  deployment, production database timings, and live credentials cannot be supplied honestly.
-- The seed creates 1,250 realistic metadata rows but no corresponding Storage objects;
-  the in-app visual demo uses one generated six-frame contact sheet.
-- Image endpoints use Supabase image transformations for thumbnails and previews;
-  transformations require a Supabase plan that enables that feature.
-- Invite delivery returns a one-time temporary password in the demo. Production
-  needs an email provider and expiring accept-invite flow.
-- ZIP output is bounded by a four-object prefetch window, but wall-clock duration
-  for very large galleries remains unbounded and the browser gets no
-  `Content-Length`.
-- Supavisor transaction mode does not support prepared statements, so the
-  Worker driver intentionally disables them. Very high write traffic should be
-  load-tested against the selected Supabase compute tier.
-- The repository now has focused unit tests; the full integration matrix and
-  Playwright browser suite from the build brief still need to be expanded before
-  calling the submission production-certified.
+```bash
+LIVE_APP_URL=https://photos-api.shivanshugupta1109.workers.dev pnpm test:e2e:live
+```
+
+The API integration test checks authentication, CSRF,
+cross-event access, member publishing/edit/delete restrictions, failed-upload
+confirmation, selection snapshots, custom PINs, incorrect PINs, unpublished
+photos, downloads, PIN rotation, membership revocation, and logout.
+
+## Known limitations
+
+- Demo image fixtures repeat six sample photographs; they are not 1,250 distinct
+  full-resolution wedding originals.
+- New-member delivery uses a one-time temporary password shown to the lead.
+  Automated invitation email and password-recovery flows are not implemented.
+- Transformation fallback downloads the original and uses more bandwidth.
+- ZIP downloads stream without a known Content-Length; very large galleries can
+  take a long time. Download disabling controls the provided download actions,
+  but cannot prevent someone from saving an image already displayed to them.
+- The workflow is tested functionally; large-scale load testing remains future work.

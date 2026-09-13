@@ -14,7 +14,7 @@ import { publicRoutes } from './routes/public.js';
 import { systemRoutes } from './routes/system.js';
 import { reapOrphanUploads } from './services/reaper.js';
 import { sweepExpiredSessions } from './services/sessions.js';
-import { databaseFor } from './services/database.js';
+import { closeDatabase, databaseFor } from './services/database.js';
 import type { AppBindings } from './types.js';
 
 const app = new OpenAPIHono<AppBindings>({
@@ -32,9 +32,14 @@ app.onError(onError);
 
 app.use('*', async (c, next) => {
   c.set('requestId', c.req.header('cf-ray') ?? ulid());
-  c.set('db', databaseFor(c.env));
-  await next();
-  c.header('X-Request-Id', c.get('requestId'));
+  const db = databaseFor(c.env);
+  c.set('db', db);
+  try {
+    await next();
+    c.header('X-Request-Id', c.get('requestId'));
+  } finally {
+    c.executionCtx.waitUntil(closeDatabase(db));
+  }
 });
 
 app.use(
@@ -193,8 +198,12 @@ export default {
     const db = databaseFor(env);
     ctx.waitUntil(
       (async () => {
-        await sweepExpiredSessions(db);
-        await reapOrphanUploads(db, env);
+        try {
+          await sweepExpiredSessions(db);
+          await reapOrphanUploads(db, env);
+        } finally {
+          await closeDatabase(db);
+        }
       })(),
     );
   },

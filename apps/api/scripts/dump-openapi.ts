@@ -17,7 +17,11 @@ const env = {
   PIN_PEPPER: 'documentation-only',
   IP_HASH_PEPPER: 'documentation-only',
 };
-const response = await app.request('/openapi.json', {}, env);
+const pending: Promise<unknown>[] = [];
+const response = await app.request('/openapi.json', {}, env, {
+  waitUntil: promise => { pending.push(promise); }, passThroughOnException() {}, props: {},
+});
+await Promise.all(pending);
 if (!response.ok) throw new Error(`OpenAPI generation failed: ${response.status}`);
 const document = await response.json();
 await writeFile(resolve(docs, 'openapi.json'), `${JSON.stringify(document, null, 2)}\n`);

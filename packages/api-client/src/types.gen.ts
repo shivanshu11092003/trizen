@@ -1809,6 +1809,7 @@ export type PostApiV1EventsByEventIdGalleriesData = {
     expiresAt?: number;
     allowDownload?: boolean;
     publish?: boolean;
+    pin?: string;
   };
   path: {
     eventId: string;

@@ -194,6 +194,17 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .photo-image { width: 100%; position: relative; overflow: hidden; background-size: 300% 200%; background-repeat: no-repeat; }
 .photo-image img { width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .2s ease; }
 .photo-image.is-ready img { opacity: 1; }
+.photo-image-error { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; color: #b9c0c9; font-size: 12px; background: #151b22; }
+.upload-drop { display: flex; align-items: center; flex-direction: column; gap: 16px; padding: 40px 16px; border: 1px dashed var(--muted); border-radius: 8px; cursor: pointer; }
+.upload-drop input { max-width: 100%; }
+.upload-files { padding: 0; list-style: none; }
+.upload-files li { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--border); }
+.upload-files li div { flex: 1; min-width: 160px; overflow-wrap: anywhere; }
+.upload-files li span { display: block; margin-top: 4px; font-size: 12px; }
+.gallery-row-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.gallery-row-actions button { border: 1px solid var(--border); border-radius: 4px; padding: 6px 10px; }
+.modal-form .checkbox-label { display: flex; align-items: center; gap: 10px; }
+.modal-form .checkbox-label input { width: auto; }
 .select-dot { position: absolute; top: 9px; right: 9px; width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 1px solid rgba(255,255,255,.7); background: rgba(6,9,12,.42); display: grid; place-items: center; cursor: pointer; }
 .select-dot.selected { color: #071216; border-color: var(--cyan); background: var(--cyan); }
 .select-dot svg { width: 13px; }

@@ -522,6 +522,10 @@ export const zPostApiV1EventsByEventIdGalleriesData = z.object({
   expiresAt: z.number().int().optional(),
   allowDownload: z.boolean().optional().default(true),
   publish: z.boolean().optional().default(false),
+  pin: z
+    .string()
+    .regex(/^\d{6}$/)
+    .optional(),
 });
 
 export const zPostApiV1EventsByEventIdGalleriesParameterEventId = z

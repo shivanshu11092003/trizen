@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "build": "wrangler deploy --dry-run --outdir=dist",
+    "dev": "node scripts/configure-env.mjs && wrangler dev",
+    "deploy": "node scripts/deploy.mjs",
+    "build": "wrangler deploy --env production --dry-run --outdir=dist",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -15,9 +15,11 @@
     "env:local": "node scripts/configure-local-env.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "supabase db reset --workdir ../..",
-    "db:migrate:remote": "supabase db push --workdir ../..",
-    "db:seed": "node --env-file=.dev.vars --import tsx scripts/seed.ts",
-    "openapi:dump": "node --import tsx scripts/dump-openapi.ts"
+    "db:migrate:remote": "node scripts/migrate-remote.mjs",
+    "db:seed": "node scripts/configure-env.mjs && node --env-file=.dev.vars --import tsx scripts/seed.ts",
+    "db:seed:images": "node scripts/configure-env.mjs && node --env-file=.dev.vars --import tsx scripts/seed-images.ts",
+    "openapi:dump": "node --import tsx scripts/dump-openapi.ts",
+    "test:integration": "node scripts/configure-env.mjs && node --env-file=.dev.vars --import tsx scripts/integration.check.ts"
   },
   "dependencies": {
     "@hono/swagger-ui": "^0.5.0",
@@ -34,10 +36,11 @@
     "@cloudflare/vitest-pool-workers": "^0.5.40",
     "@cloudflare/workers-types": "^4.20241224.0",
     "drizzle-kit": "^0.30.1",
+    "sharp": "^0.35.4",
     "supabase": "^2.116.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vitest": "2.1.9",
-    "wrangler": "^3.99.0"
+    "wrangler": "^4.131.1"
   }
 }

@@ -1,10 +1,11 @@
+import { apiRouter } from '../lib/openapi.js';
 import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
 import { sql } from 'drizzle-orm';
 import { ok } from '../lib/openapi.js';
 import { storageReady } from '../services/storage.js';
 import type { AppBindings } from '../types.js';
 
-export const systemRoutes = new OpenAPIHono<AppBindings>();
+export const systemRoutes = apiRouter();
 
 systemRoutes.openapi(
   createRoute({

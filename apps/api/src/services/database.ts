@@ -3,35 +3,24 @@ import postgres, { type Sql } from 'postgres';
 import * as schema from '../db/schema.js';
 import type { Env } from '../types.js';
 
-export type Database = PostgresJsDatabase<typeof schema>;
-
-let connectionUrl: string | undefined;
-let client: Sql | undefined;
-let database: Database | undefined;
+export type Database = PostgresJsDatabase<typeof schema> & { $client: Sql };
 
 /**
  * Supabase's transaction pooler is designed for short-lived edge workloads.
- * Prepared statements must stay disabled in transaction mode. The module-level
- * client is reused while a Worker isolate is warm and releases idle sockets.
+ * Prepared statements must stay disabled in transaction mode. Each request owns
+ * its client because Worker TCP sockets cannot be reused across requests.
  */
 export function databaseFor(env: Pick<Env, 'DATABASE_URL'>): Database {
-  if (!database || connectionUrl !== env.DATABASE_URL) {
-    connectionUrl = env.DATABASE_URL;
-    client = postgres(env.DATABASE_URL, {
-      prepare: false,
-      max: 1,
-      idle_timeout: 20,
-      connect_timeout: 10,
-      max_lifetime: 60 * 10,
-    });
-    database = drizzle(client, { schema });
-  }
-  return database;
+  const client = postgres(env.DATABASE_URL, {
+    prepare: false,
+    max: 1,
+    idle_timeout: 20,
+    connect_timeout: 10,
+    max_lifetime: 60 * 10,
+  });
+  return drizzle(client, { schema });
 }
 
-export async function closeDatabase(): Promise<void> {
-  await client?.end({ timeout: 1 });
-  connectionUrl = undefined;
-  client = undefined;
-  database = undefined;
+export async function closeDatabase(database: Database): Promise<void> {
+  await database.$client.end({ timeout: 1 });
 }

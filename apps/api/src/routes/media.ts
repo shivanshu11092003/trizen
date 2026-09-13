@@ -1,13 +1,14 @@
+import { apiRouter } from '../lib/openapi.js';
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { AppError } from '@photos/shared';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, or } from 'drizzle-orm';
 import { eventMembers, photos } from '../db/schema.js';
 import { readSessionCookie } from '../lib/cookies.js';
 import { resolveSession } from '../services/sessions.js';
 import { getStorageObject } from '../services/storage.js';
 import type { AppBindings } from '../types.js';
 
-export const mediaRoutes = new OpenAPIHono<AppBindings>();
+export const mediaRoutes = apiRouter();
 
 mediaRoutes.get('/img/:variant/*', async (c) => {
   const variant = c.req.param('variant');
@@ -22,7 +23,8 @@ mediaRoutes.get('/img/:variant/*', async (c) => {
   const [allowed] = await c.get('db').select({ contentType: photos.contentType })
     .from(photos)
     .innerJoin(eventMembers, and(eq(eventMembers.eventId, photos.eventId), eq(eventMembers.userId, session.userId)))
-    .where(and(eq(photos.storageKey, storageKey), eq(photos.status, 'ready')))
+    .where(and(eq(photos.storageKey, storageKey), eq(photos.status, 'ready'),
+      or(eq(eventMembers.role, 'admin'), eq(photos.uploadedBy, session.userId))))
     .limit(1);
   if (!allowed) throw new AppError('NOT_FOUND', 'Photo not found.');
 

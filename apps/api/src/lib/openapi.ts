@@ -1,6 +1,15 @@
-import { ErrorBody } from '@photos/shared';
+import { AppError, ErrorBody } from '@photos/shared';
+import { OpenAPIHono } from '@hono/zod-openapi';
+import type { AppBindings } from '../types.js';
+import { zodDetails } from './http.js';
 import type { RouteConfig } from '@hono/zod-openapi';
 import type { z } from 'zod';
+
+export function apiRouter() {
+  return new OpenAPIHono<AppBindings>({ defaultHook: (result) => {
+    if (!result.success) throw new AppError('VALIDATION_FAILED', 'Some fields need attention.', { details: zodDetails(result.error) });
+  } });
+}
 
 /** Every documented failure uses the same envelope, so the docs can't drift. */
 export const err = (description: string) => ({

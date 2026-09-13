@@ -1,3 +1,4 @@
+import { apiRouter } from '../lib/openapi.js';
 import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
 import {
   AddMemberBody,
@@ -23,7 +24,7 @@ import { requireEventRole, sessionAuth } from '../middleware/auth.js';
 import { audit } from '../services/audit.js';
 import type { AppBindings } from '../types.js';
 
-export const eventRoutes = new OpenAPIHono<AppBindings>();
+export const eventRoutes = apiRouter();
 
 type EventCursorRow = { id: string; createdAt: number };
 const eventSort: SortSpec<EventCursorRow> = {
@@ -202,13 +203,15 @@ eventRoutes.openapi(
         storageBytes: sql<number>`COALESCE(SUM(${photos.fileSize}), 0)`.mapWith(Number),
       })
       .from(photos)
-      .where(and(eq(photos.eventId, eventId), sql`${photos.status} != 'deleted'`));
+      .where(and(eq(photos.eventId, eventId), sql`${photos.status} != 'deleted'`,
+        c.get('eventRole') === 'member' ? eq(photos.uploadedBy, c.get('session')!.userId) : undefined));
 
     const uploaders = await db
       .select({ userId: users.id, displayName: users.displayName, count: count() })
       .from(photos)
       .innerJoin(users, eq(users.id, photos.uploadedBy))
-      .where(and(eq(photos.eventId, eventId), eq(photos.status, 'ready')))
+      .where(and(eq(photos.eventId, eventId), eq(photos.status, 'ready'),
+        c.get('eventRole') === 'member' ? eq(photos.uploadedBy, c.get('session')!.userId) : undefined))
       .groupBy(users.id, users.displayName);
 
     const [g] = await db.select({ n: count() }).from(galleries).where(eq(galleries.eventId, eventId));
@@ -270,7 +273,7 @@ eventRoutes.openapi(
       await db.insert(users).values({
         id,
         email: body.email,
-        passwordHash: await hashSecret(temporaryPassword),
+        passwordHash: await hashSecret(temporaryPassword, c.env.PIN_PEPPER),
         displayName: body.displayName ?? body.email.split('@')[0]!,
         isPlatformAdmin: false,
         createdAt: now,

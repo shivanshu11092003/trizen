@@ -1,7 +1,5 @@
 import { HttpError } from './errors.js';
 
-const neverAborts = new AbortController().signal;
-
 /** Unordered worker pool. For uploads/downloads where completion order is irrelevant. */
 export async function mapPool<T, R>(
   items: readonly T[],
@@ -9,6 +7,8 @@ export async function mapPool<T, R>(
   fn: (item: T, index: number, signal: AbortSignal) => Promise<R>,
   opts: { signal?: AbortSignal; onSettled?: (done: number, total: number) => void } = {},
 ): Promise<PromiseSettledResult<R>[]> {
+  // Create signals inside the operation: Workers disallow this at module scope.
+  const signal = opts.signal ?? new AbortController().signal;
   const results = new Array<PromiseSettledResult<R>>(items.length);
   let next = 0;
   let done = 0;
@@ -19,7 +19,7 @@ export async function mapPool<T, R>(
       const i = next++;
       if (i >= items.length) return;
       try {
-        results[i] = { status: 'fulfilled', value: await fn(items[i]!, i, opts.signal ?? neverAborts) };
+        results[i] = { status: 'fulfilled', value: await fn(items[i]!, i, signal) };
       } catch (reason) {
         // One bad file must not fail the batch. The caller decides what a
         // partial success means -- for 40 photos, 39 succeeded.
@@ -110,11 +110,12 @@ export async function withRetry<T>(
     isRetryable = defaultRetryable,
     random = Math.random,
   } = opts;
+  const operationSignal = signal ?? new AbortController().signal;
 
   for (let attempt = 0; ; attempt++) {
     signal?.throwIfAborted();
     try {
-      return await fn(signal ?? neverAborts);
+      return await fn(operationSignal);
     } catch (e) {
       if (attempt >= attempts - 1 || !isRetryable(e)) throw e;
       await sleep(random() * Math.min(capMs, baseMs * 2 ** attempt), signal);

@@ -1,15 +1,14 @@
 # Architecture notes
 
-The app is deployed on one origin. Cloudflare Pages serves the React shell while
-the Worker owns `/api/*`, `/img/*`, `/docs`, and `/redoc`. Keeping those paths on
+The app is deployed on one origin. A Cloudflare Worker serves the React static assets
+and owns `/api/*` and `/img/*`; API documentation is disabled in production. Keeping those paths on
 one hostname is a security decision: the team session can stay in an httpOnly,
 `SameSite=Strict`, `__Host-` cookie and no CORS policy exists to misconfigure.
 
 ```mermaid
 flowchart LR
   B[Browser] --> E[Cloudflare edge]
-  E --> P[Pages / React]
-  E --> W[Hono Worker]
+  E --> W[Hono Worker + React assets]
   W --> D[(Supabase Postgres)]
   W --> R[(Private Supabase Storage)]
   R --> I[Supabase image transforms]
@@ -27,6 +26,7 @@ sequenceDiagram
   W-->>B: signed Storage PUT URLs
   B->>R: PUT bytes directly (4 concurrent)
   B->>W: POST confirm
+  W->>R: verify object exists, size and content type
   W->>D: pending → ready
 ```
 

@@ -1,3 +1,4 @@
+import { apiRouter } from '../lib/openapi.js';
 import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
 import {
   AppError,
@@ -26,7 +27,7 @@ import { createGallerySession, resolveGallerySession } from '../services/session
 import { getStorageObject } from '../services/storage.js';
 import type { AppBindings } from '../types.js';
 
-export const publicRoutes = new OpenAPIHono<AppBindings>();
+export const publicRoutes = apiRouter();
 const PIN_WINDOW_MS = 15 * 60 * 1000;
 const PIN_FAILURE_LIMIT = 5;
 
@@ -168,7 +169,7 @@ publicRoutes.openapi(
       });
     }
 
-    const valid = await verifySecret(pin, gallery.pinHash);
+    const valid = await verifySecret(pin, gallery.pinHash, c.env.PIN_PEPPER);
     await c.get('db').insert(pinAttempts).values({
       id: ulid(now),
       galleryId: gallery.id,
@@ -239,7 +240,9 @@ publicRoutes.get('/public/galleries/:slug/photos/:photoId/image/:variant', galle
   const gallery = c.get('gallery')!;
   const variant = c.req.param('variant');
   if (!['thumb', 'preview', 'full'].includes(variant)) throw new AppError('NOT_FOUND', 'Image variant not found.');
-  const [photo] = await c.get('db').select({ key: photos.storageKey, type: photos.contentType })
+  const download = c.req.query('download') === '1';
+  if (download && !gallery.allowDownload) throw new AppError('DOWNLOAD_DISABLED', 'Downloads are disabled for this gallery.');
+  const [photo] = await c.get('db').select({ key: photos.storageKey, type: photos.contentType, filename: photos.filename })
     .from(galleryPhotos)
     .innerJoin(photos, eq(photos.id, galleryPhotos.photoId))
     .where(and(eq(galleryPhotos.galleryId, gallery.galleryId), eq(photos.id, c.req.param('photoId')), eq(photos.status, 'ready')))
@@ -247,7 +250,9 @@ publicRoutes.get('/public/galleries/:slug/photos/:photoId/image/:variant', galle
   if (!photo) throw new AppError('NOT_FOUND', 'Photo not found.');
   const object = await getStorageObject(c.env, photo.key, variant as 'thumb' | 'preview' | 'full');
   if (!object?.body) throw new AppError('NOT_FOUND', 'Photo not found.');
-  return new Response(object.body, { headers: { 'Content-Type': object.headers.get('content-type') ?? photo.type, 'Cache-Control': 'private, max-age=3600' } });
+  return new Response(object.body, { headers: { 'Content-Type': object.headers.get('content-type') ?? photo.type, 'Cache-Control': 'private, max-age=3600',
+    ...(download ? { 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(photo.filename)}` } : {}),
+  } });
 });
 
 publicRoutes.openapi(
@@ -268,7 +273,7 @@ publicRoutes.openapi(
   },
 );
 
-publicRoutes.post('/public/galleries/:slug/download-all', galleryAuth(), async (c) => {
+publicRoutes.on(['GET', 'POST'], '/public/galleries/:slug/download-all', galleryAuth(), async (c) => {
   const principal = c.get('gallery')!;
   if (!principal.allowDownload) throw new AppError('DOWNLOAD_DISABLED', 'Downloads are disabled for this gallery.');
   const rows = await c.get('db').select({

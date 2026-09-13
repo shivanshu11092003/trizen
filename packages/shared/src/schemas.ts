@@ -231,6 +231,7 @@ export const CreateGalleryBody = z
     expiresAt: z.number().int().optional(),
     allowDownload: z.boolean().default(true),
     publish: z.boolean().default(false),
+    pin: z.string().regex(/^\d{6}$/, 'The PIN is six digits').optional(),
   })
   .refine((v) => v.useSelected || (v.photoIds && v.photoIds.length > 0), {
     message: 'Choose photos, or set useSelected to publish the current selection',

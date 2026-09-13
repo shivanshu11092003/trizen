@@ -4,11 +4,11 @@
   "type": "module",
   "packageManager": "pnpm@11.3.0",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12"
   },
   "scripts": {
     "dev": "pnpm --parallel --filter \"./apps/*\" dev",
-    "build": "pnpm -r build",
+    "build": "pnpm --filter web build && pnpm --filter api build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "test:e2e": "playwright test",
@@ -19,7 +19,10 @@
     "db:generate": "pnpm --filter api db:generate",
     "db:migrate": "pnpm --filter api db:migrate",
     "db:seed": "pnpm --filter api db:seed",
-    "gen:api": "pnpm --filter api openapi:dump && openapi-ts && node scripts/verify-codegen.mjs"
+    "gen:api": "pnpm --filter api openapi:dump && openapi-ts && node scripts/verify-codegen.mjs",
+    "deploy": "pnpm build && pnpm --filter api db:migrate:remote && pnpm --filter api deploy",
+    "test:integration": "pnpm --filter api test:integration",
+    "test:e2e:live": "LIVE_SUPABASE_TESTS=1 node --env-file-if-exists=apps/api/.dev.vars --env-file-if-exists=.env node_modules/@playwright/test/cli.js test e2e/workflow-live.spec.ts --project=chromium"
   },
   "devDependencies": {
     "@hey-api/openapi-ts": "^0.73.0",

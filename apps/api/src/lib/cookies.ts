@@ -29,7 +29,7 @@ export function readSessionCookie(c: Context<AppBindings>): string | undefined {
 }
 
 export function clearSessionCookie(c: Context<AppBindings>): void {
-  deleteCookie(c, SESSION_COOKIE, { path: '/' });
+  deleteCookie(c, SESSION_COOKIE, { path: '/', secure: true });
   deleteCookie(c, 'sid', { path: '/' });
 }
 

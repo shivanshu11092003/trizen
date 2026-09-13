@@ -1,3 +1,4 @@
+import { apiRouter } from '../lib/openapi.js';
 import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
 import {
   AppError,
@@ -24,7 +25,7 @@ import { createSession, revokeOtherSessions, revokeSession } from '../services/s
 import type { AppBindings } from '../types.js';
 import { audit } from '../services/audit.js';
 
-export const authRoutes = new OpenAPIHono<AppBindings>();
+export const authRoutes = apiRouter();
 
 async function loadMe(c: Parameters<typeof createSession>[0], userId: string) {
   const rows = await c
@@ -69,7 +70,7 @@ authRoutes.openapi(
     await db.insert(users).values({
       id,
       email: body.email,
-      passwordHash: await hashSecret(body.password),
+      passwordHash: await hashSecret(body.password, c.env.PIN_PEPPER),
       displayName: body.displayName,
       isPlatformAdmin: true, // anyone who registers directly can create events
       createdAt: now,
@@ -137,8 +138,8 @@ authRoutes.openapi(
 
     // Always run a verification, even with no user: identical work means
     // identical timing, so an attacker cannot enumerate registered emails.
-    const dummy = 'pbkdf2$210000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
-    const valid = await verifySecret(body.password, user?.passwordHash ?? dummy);
+    const dummy = 'pbkdf2p$100000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+    const valid = await verifySecret(body.password, user?.passwordHash ?? dummy, c.env.PIN_PEPPER);
 
     if (!user || !valid) throw new AppError('UNAUTHENTICATED', 'Wrong email or password.');
 

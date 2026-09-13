@@ -4,11 +4,19 @@ import { hashSecret, sha256Hex, verifySecret } from '../src/lib/crypto.js';
 
 describe('security primitives', () => {
   it('stores verifiable PBKDF2 hashes without the source secret', async () => {
-    const stored = await hashSecret('correct horse battery staple');
-    expect(stored).toMatch(/^pbkdf2\$210000\$/);
+    const pepper = 'test-server-pepper';
+    const stored = await hashSecret('correct horse battery staple', pepper);
+    expect(stored).toMatch(/^pbkdf2p\$100000\$/);
     expect(stored).not.toContain('correct horse');
-    await expect(verifySecret('correct horse battery staple', stored)).resolves.toBe(true);
-    await expect(verifySecret('wrong secret', stored)).resolves.toBe(false);
+    await expect(verifySecret('correct horse battery staple', stored, pepper)).resolves.toBe(true);
+    await expect(verifySecret('wrong secret', stored, pepper)).resolves.toBe(false);
+    await expect(verifySecret('correct horse battery staple', stored, 'different-pepper')).resolves.toBe(
+      false,
+    );
+    await expect(
+      verifySecret('correct horse battery staple', stored.replace('$100000$', '$210000$'), pepper),
+    ).resolves.toBe(false);
+    await expect(hashSecret('password', '')).rejects.toThrow('PIN_PEPPER is required');
   });
 
   it('mints URL-safe, high-entropy session and gallery identifiers', () => {

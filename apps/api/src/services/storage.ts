@@ -57,15 +57,30 @@ export async function getStorageObject(
     url.searchParams.set('resize', 'contain');
   }
 
-  const response = await fetch(url, {
-    headers: {
-      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
-    },
-  });
+  const headers = {
+    apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+    Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+  };
+  let response = await fetch(url, { headers });
+  // Some plans and image formats cannot be transformed. The authenticated
+  // original remains usable, with the same application authorization checks.
+  if (transformed && !response.ok) {
+    await response.body?.cancel();
+    response = await fetch(new URL(
+      `${env.SUPABASE_URL}/storage/v1/object/authenticated/${encodeURIComponent(env.SUPABASE_STORAGE_BUCKET)}/${encodePath(storageKey)}`,
+    ), { headers });
+  }
   if (response.status === 404) return null;
   if (!response.ok) {
-    console.error('Supabase Storage download failed', response.status, await response.text());
+    const body = await response.text();
+    // Supabase may transport NoSuchKey as HTTP 400 with statusCode 404.
+    if (response.status === 400) {
+      try {
+        const error = JSON.parse(body) as { statusCode?: string | number; code?: string };
+        if (String(error.statusCode) === '404' || error.code === 'NoSuchKey') return null;
+      } catch { /* A non-JSON upstream error is still a storage failure. */ }
+    }
+    console.error('Supabase Storage download failed', response.status, body);
     throw new AppError('INTERNAL', 'Storage is temporarily unavailable.');
   }
   return response;
@@ -75,6 +90,16 @@ export async function deleteStorageObjects(env: Env, paths: string[]): Promise<v
   if (!paths.length) return;
   const { error } = await supabaseFor(env).storage.from(env.SUPABASE_STORAGE_BUCKET).remove(paths);
   if (error) throw error;
+}
+
+export async function storageObjectInfo(env: Env, path: string): Promise<{ size: number; contentType: string } | null> {
+  const { data, error } = await supabaseFor(env).storage.from(env.SUPABASE_STORAGE_BUCKET).info(path);
+  if (error) {
+    if ('statusCode' in error && String(error.statusCode) === '404') return null;
+    throw new AppError('UPLOAD_FAILED', 'Could not verify the upload. Please retry.');
+  }
+  if (!data) return null;
+  return { size: data.size ?? 0, contentType: data.contentType ?? '' };
 }
 
 export async function storageReady(env: Env): Promise<boolean> {

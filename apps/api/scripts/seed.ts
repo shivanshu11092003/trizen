@@ -2,25 +2,16 @@ import { eventMembers, events, galleries, galleryPhotos, photos, users } from '.
 import { hashSecret } from '../src/lib/crypto.js';
 import { closeDatabase, databaseFor } from '../src/services/database.js';
 import type { Env } from '../src/types.js';
+import { fixedId } from './seed-ids.js';
+import { seedImages } from './seed-images.js';
 
 const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) throw new Error('DATABASE_URL is required. Copy .env.example to apps/api/.dev.vars.');
+if (!databaseUrl) throw new Error('DATABASE_URL is required. Set it in the root .env file.');
 
 const db = databaseFor({ DATABASE_URL: databaseUrl } as Env);
 const now = Date.now();
 const password = 'TrizenDemo!2026';
 const pin = '274913';
-const alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-
-function fixedId(sequence: number): string {
-  let tail = '';
-  let value = sequence;
-  for (let index = 0; index < 16; index++) {
-    tail = alphabet[value % 32]! + tail;
-    value = Math.floor(value / 32);
-  }
-  return `01K4K00000${tail}`;
-}
 
 const adminId = fixedId(1);
 const member1Id = fixedId(2);
@@ -29,8 +20,10 @@ const outsiderId = fixedId(4);
 const eventId = fixedId(10);
 const outsiderEventId = fixedId(11);
 const galleryId = fixedId(20);
-const passwordHash = await hashSecret(password);
-const pinHash = await hashSecret(pin);
+const pepper = process.env.PIN_PEPPER;
+if (!pepper) throw new Error('PIN_PEPPER is required in the root .env file.');
+const passwordHash = await hashSecret(password, pepper);
+const pinHash = await hashSecret(pin, pepper);
 const slug = 'arjun-priya-2026-demo';
 
 try {
@@ -85,6 +78,7 @@ try {
   for (let index = 0; index < photoRows.length; index += 250) {
     await db.insert(photos).values(photoRows.slice(index, index + 250)).onConflictDoNothing();
   }
+  await seedImages(db);
 
   await db.insert(galleries).values({
     id: galleryId,
@@ -117,5 +111,5 @@ try {
 
   console.log(`\nSeeded 1,250 photo records in Supabase Postgres.\nAdmin: admin@demo.trizen.dev / ${password}\nMember: member1@demo.trizen.dev / ${password}\nGallery: http://localhost:5173/gallery/${slug}\nPIN: ${pin}`);
 } finally {
-  await closeDatabase();
+  await closeDatabase(db);
 }

@@ -5706,6 +5706,10 @@
                   "publish": {
                     "type": "boolean",
                     "default": false
+                  },
+                  "pin": {
+                    "type": "string",
+                    "pattern": "^\\d{6}$"
                   }
                 },
                 "required": [

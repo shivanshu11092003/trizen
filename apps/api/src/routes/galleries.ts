@@ -1,3 +1,4 @@
+import { apiRouter } from '../lib/openapi.js';
 import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
 import {
   AppError,
@@ -21,7 +22,7 @@ import { audit } from '../services/audit.js';
 import { revokeGallerySessions } from '../services/sessions.js';
 import type { AppBindings } from '../types.js';
 
-export const galleryRoutes = new OpenAPIHono<AppBindings>();
+export const galleryRoutes = apiRouter();
 
 const galleryFields = {
   id: galleries.id,
@@ -35,7 +36,10 @@ const galleryFields = {
   viewCount: galleries.viewCount,
   lastViewedAt: galleries.lastViewedAt,
   createdAt: galleries.createdAt,
-  photoCount: sql<number>`(SELECT COUNT(*) FROM ${galleryPhotos} WHERE ${galleryPhotos.galleryId} = ${galleries.id})`.mapWith(Number),
+  photoCount:
+    sql<number>`(SELECT COUNT(*) FROM ${galleryPhotos} WHERE ${galleryPhotos.galleryId} = ${galleries.id})`.mapWith(
+      Number,
+    ),
 };
 
 type GalleryRow = z.infer<typeof Gallery>;
@@ -54,7 +58,10 @@ async function loadOwnedGallery(c: Parameters<typeof audit>[0], galleryId: strin
   const [row] = await db
     .select({ gallery: galleries, memberRole: eventMembers.role })
     .from(galleries)
-    .leftJoin(eventMembers, and(eq(eventMembers.eventId, galleries.eventId), eq(eventMembers.userId, s.userId)))
+    .leftJoin(
+      eventMembers,
+      and(eq(eventMembers.eventId, galleries.eventId), eq(eventMembers.userId, s.userId)),
+    )
     .where(eq(galleries.id, galleryId))
     .limit(1);
   if (!row || !row.memberRole) throw new AppError('NOT_FOUND', 'Gallery not found.');
@@ -121,35 +128,38 @@ galleryRoutes.openapi(
 
     const id = ulid(now);
     const slug = gallerySlug();
-    const pin = generatePin();
+    const pin = body.pin ?? generatePin();
+    const pinHash = await hashSecret(pin, c.env.PIN_PEPPER);
 
-    await db.insert(galleries).values({
-      id,
-      eventId,
-      slug,
-      title: body.title,
-      pinHash: await hashSecret(pin),
-      pinSetAt: now,
-      status: body.publish ? 'published' : 'draft',
-      publishedAt: body.publish ? now : null,
-      expiresAt: body.expiresAt ?? null,
-      allowDownload: body.allowDownload,
-      createdBy: s.userId,
-      createdAt: now,
-      updatedAt: now,
+    await db.transaction(async (tx) => {
+      await tx.insert(galleries).values({
+        id,
+        eventId,
+        slug,
+        title: body.title,
+        pinHash,
+        pinSetAt: now,
+        status: body.publish ? 'published' : 'draft',
+        publishedAt: body.publish ? now : null,
+        expiresAt: body.expiresAt ?? null,
+        allowDownload: body.allowDownload,
+        createdBy: s.userId,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      // Batch the snapshot: 600 individual inserts would be 600 round trips.
+      for (let i = 0; i < chosen.length; i += 100) {
+        await tx.insert(galleryPhotos).values(
+          chosen.slice(i, i + 100).map((p, j) => ({
+            galleryId: id,
+            photoId: p.id,
+            sortOrder: i + j,
+            addedAt: now,
+          })),
+        );
+      }
     });
-
-    // Batch the snapshot: 600 individual inserts would be 600 round trips.
-    for (let i = 0; i < chosen.length; i += 100) {
-      await db.insert(galleryPhotos).values(
-        chosen.slice(i, i + 100).map((p, j) => ({
-          galleryId: id,
-          photoId: p.id,
-          sortOrder: i + j,
-          addedAt: now,
-        })),
-      );
-    }
 
     await audit(c, {
       action: body.publish ? 'gallery.published' : 'gallery.created',
@@ -175,7 +185,7 @@ galleryRoutes.openapi(
           lastViewedAt: null,
           createdAt: now,
         },
-        url: `${c.env.PUBLIC_ORIGIN}/gallery/${slug}`,
+        url: `${c.env.PUBLIC_ORIGIN || new URL(c.req.url).origin}/gallery/${slug}`,
         pin,
       },
       201,
@@ -192,7 +202,7 @@ galleryRoutes.openapi(
     tags: ['Galleries'],
     summary: 'List galleries for an event',
     security: [{ sessionAuth: [] }],
-    middleware: [sessionAuth(), requireEventRole('member')] as const,
+    middleware: [sessionAuth(), requireEventRole('admin')] as const,
     request: { params: z.object({ eventId: Ulid }), query: PaginationQuery },
     responses: { 200: ok(page(Gallery), 'A page of galleries.'), ...authErrors, ...listErrors },
   }),
@@ -208,7 +218,12 @@ galleryRoutes.openapi(
       cursor,
       secret: c.env.CURSOR_SECRET,
       select: (where, order, take) =>
-        db.select(galleryFields).from(galleries).where(where).orderBy(...order).limit(take),
+        db
+          .select(galleryFields)
+          .from(galleries)
+          .where(where)
+          .orderBy(...order)
+          .limit(take),
     });
 
     return c.json(result, 200);
@@ -265,7 +280,11 @@ for (const [action, status] of [
         targetId: galleryId,
       });
 
-      const [row] = await c.get('db').select(galleryFields).from(galleries).where(eq(galleries.id, galleryId));
+      const [row] = await c
+        .get('db')
+        .select(galleryFields)
+        .from(galleries)
+        .where(eq(galleries.id, galleryId));
       return c.json(row!, 200);
     },
   );
@@ -300,7 +319,7 @@ galleryRoutes.openapi(
     await c
       .get('db')
       .update(galleries)
-      .set({ pinHash: await hashSecret(pin), pinSetAt: now, updatedAt: now })
+      .set({ pinHash: await hashSecret(pin, c.env.PIN_PEPPER), pinSetAt: now, updatedAt: now })
       .where(eq(galleries.id, galleryId));
 
     await revokeGallerySessions(c, galleryId);

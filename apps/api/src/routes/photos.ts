@@ -1,3 +1,4 @@
+import { apiRouter } from '../lib/openapi.js';
 import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
 import {
   AppError,
@@ -19,10 +20,10 @@ import { authErrors, err, listErrors, ok } from '../lib/openapi.js';
 import { photoSorts } from '../lib/sorts.js';
 import { requireEventRole, sessionAuth } from '../middleware/auth.js';
 import { audit } from '../services/audit.js';
-import { createSignedUpload, storageKeyFor } from '../services/storage.js';
+import { createSignedUpload, storageKeyFor, storageObjectInfo } from '../services/storage.js';
 import type { AppBindings } from '../types.js';
 
-export const photoRoutes = new OpenAPIHono<AppBindings>();
+export const photoRoutes = apiRouter();
 
 /** An uploader may delete their own mistake, but only for a short while. */
 const SELF_DELETE_WINDOW_MS = 15 * 60 * 1000;
@@ -146,6 +147,22 @@ photoRoutes.openapi(
     let confirmed = 0;
 
     for (const item of items) {
+      const [photo] = await db.select().from(photos).where(and(
+        eq(photos.id, item.photoId), eq(photos.eventId, eventId), eq(photos.uploadedBy, s.userId),
+      )).limit(1);
+      if (!photo || (photo.status !== 'pending' && photo.status !== 'ready')) {
+        missing.push(item.photoId);
+        continue;
+      }
+      if (photo.status === 'ready') {
+        confirmed++;
+        continue;
+      }
+      const object = await storageObjectInfo(c.env, photo.storageKey);
+      if (!object || object.size !== photo.fileSize || object.contentType.split(';')[0] !== photo.contentType) {
+        missing.push(item.photoId);
+        continue;
+      }
       const updated = await db
         .update(photos)
         .set({
@@ -205,6 +222,7 @@ photoRoutes.openapi(
     const filters: (SQL | undefined)[] = [
       eq(photos.eventId, eventId),
       eq(photos.status, 'ready'),
+      c.get('eventRole') === 'member' ? eq(photos.uploadedBy, c.get('session')!.userId) : undefined,
       q.search ? like(photos.filenameLower, `%${q.search.toLowerCase()}%`) : undefined,
       q.uploaderId ? eq(photos.uploadedBy, q.uploaderId) : undefined,
       q.selected !== undefined ? eq(photos.isSelected, q.selected === 'true') : undefined,
