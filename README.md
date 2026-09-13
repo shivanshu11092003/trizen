@@ -164,7 +164,7 @@ sequenceDiagram
   participant D as Supabase PostgreSQL
   participant S as Private Supabase Storage
   T->>W: Request upload slots with file metadata
-  W->>D: Check session and event membership; reserve pending rows
+  W->>D: Check session and event membership, then reserve pending rows
   W-->>T: Signed upload URLs
   T->>S: Upload image bytes directly (up to four concurrent files)
   T->>W: Confirm completed uploads
