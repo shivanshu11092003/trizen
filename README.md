@@ -6,24 +6,36 @@ Customers do not register or sign in to a team account.
 
 ## Submission links and demo access
 
-- Source repository: https://github.com/shivanshu11092003/trizen
-- Local application: http://localhost:5173
-- Local customer gallery: http://localhost:5173/gallery/arjun-priya-2026-demo
-- Gallery PIN: `274913`
-- Demo lead: `admin@demo.trizen.dev` / `TrizenDemo!2026`
-- Demo member: `member1@demo.trizen.dev` / `TrizenDemo!2026`
-- Live application: https://photos-api.shivanshugupta1109.workers.dev
-- Live customer gallery: https://photos-api.shivanshugupta1109.workers.dev/gallery/arjun-priya-2026-demo
+| Deliverable | Link |
+|---|---|
+| Live application | [Open Arc & Grain](https://photos-api.shivanshugupta1109.workers.dev) |
+| Public source code | [GitHub repository](https://github.com/shivanshu11092003/trizen) |
+| Project documentation | [README on GitHub](https://github.com/shivanshu11092003/trizen/blob/main/README.md) |
+| Customer demo | [Open the private gallery](https://photos-api.shivanshugupta1109.workers.dev/gallery/arjun-priya-2026-demo) |
+| Requirement coverage | [Challenge checklist](docs/requirements.md) |
 
-The public lead/member/customer workflow was verified on September 13, 2026,
-including actual uploads, interrupted-upload retry, publishing and PIN access.
+| Role | Email / account | Password / PIN | Start here |
+|---|---|---|---|
+| Admin / Lead | `admin@demo.trizen.dev` | Password: `TrizenDemo!2026` | [Team login](https://photos-api.shivanshugupta1109.workers.dev/login) |
+| Team Member | `member1@demo.trizen.dev` | Password: `TrizenDemo!2026` | [Team login](https://photos-api.shivanshugupta1109.workers.dev/login) |
+| Customer | No account required | Gallery PIN: `274913` | [Customer gallery](https://photos-api.shivanshugupta1109.workers.dev/gallery/arjun-priya-2026-demo) |
 
-These demo accounts are public test fixtures. Supabase credentials, connection
-strings, API keys, and application signing secrets belong in the ignored `.env`
-file or Cloudflare/GitHub secrets, never in Git.
+These are intentionally public demo credentials. Infrastructure credentials and
+signing secrets are excluded from Git and supplied through the ignored root
+`.env` and Cloudflare Worker secrets. GitHub deployment secrets have not been
+configured; see [CI status](#github-actions-and-deployment-status).
 
-The challenge deadline is September 20, 2026 at 11:59 PM IST. The requirement
-mapping and remaining submission item are in [docs/requirements.md](docs/requirements.md).
+For a quick review, open the customer gallery in a private browser window and
+enter its PIN. Then sign in as the member to inspect uploads, and as the lead to
+review selection, publishing and team management. Separate browser profiles keep
+the two team sessions independent. Use a new event to try the full workflow.
+
+The live lead/member/customer workflow has been verified, including real uploads,
+an interrupted transfer and retry, publishing, PIN access, single/bulk deletion,
+locking and unpublishing. Photo checkboxes start unchecked; marks are temporary
+and are cleared on reload.
+
+Submission deadline: **September 20, 2026, 11:59 PM IST**.
 
 ## Roles and workflow
 
@@ -53,6 +65,52 @@ succeed entirely or change nothing. Leads may delete any event photo; members
 may delete only their own uploads within 15 minutes. Deletion uses the existing
 soft-delete model: originals remain in private storage, and there is no restore
 or permanent-purge action in the UI.
+
+## Workflow diagrams
+
+```mermaid
+flowchart TD
+  A[Lead registers or signs in] --> B[Create event and add team members]
+  B --> C[Member signs in and opens assigned event]
+  C --> D[Choose multiple photographs]
+  D --> E[Upload to private Supabase Storage]
+  E --> F{Upload verified?}
+  F -->|No| G[Show failure and retry unfinished uploads]
+  G --> E
+  F -->|Yes| H[Lead reviews team photographs]
+  H --> I[Mark photos and add to gallery selection]
+  I --> J[Create gallery with custom or generated PIN]
+  J --> K[Publish and copy link plus PIN]
+  K --> L[Customer opens link without an account]
+  L --> M{Correct PIN?}
+  M -->|No| N[Show error and limit repeated attempts]
+  N --> M
+  M -->|Yes| O[Browse curated photos and allowed downloads]
+  O --> P[Lock gallery to end customer session]
+```
+
+**Marks and gallery selection:** checking a circle marks a photo for the next
+bulk action. **Add to selection** saves that choice for future galleries;
+**Deselect** removes it. **Clear** only clears the temporary marks. The
+**Selected** filter shows the saved selection. Existing published galleries keep
+their snapshot when selection changes; explicit deletion removes a photo from
+all galleries.
+
+| Capability | Admin / Lead | Team Member | Customer |
+|---|---|---|---|
+| Team sign-in | Yes | Yes | No account needed |
+| Create events | Registered workspace lead | No | No |
+| Add/remove event members | Yes | No | No |
+| Upload photographs | Yes | Assigned events | No |
+| Browse team originals | All photos in their event | Own uploads only | No |
+| Select photos and publish galleries | Yes | No | No |
+| Delete photos | Any photo in their event | Own uploads within 15 minutes | No |
+| View a published gallery | With its link and PIN | With its link and PIN | With its link and PIN |
+| Download gallery photos | When enabled | When enabled | When enabled |
+
+Roles apply per event. Knowing another event's ID does not grant access. Newly
+registered leads can create events; a member invited as an event lead can manage
+that event without automatically receiving workspace-wide creation rights.
 
 ## Technology choices
 
@@ -96,6 +154,75 @@ security, and private `photos-originals` bucket. There are no browser table
 policies; application access goes through the API. Foreign keys and event-scoped
 queries keep photos and galleries attached to their owning event. Gallery and
 snapshot creation happens in one database transaction.
+
+### Upload and access flow
+
+```mermaid
+sequenceDiagram
+  participant T as Team browser
+  participant W as Cloudflare Worker
+  participant D as Supabase PostgreSQL
+  participant S as Private Supabase Storage
+  T->>W: Request upload slots with file metadata
+  W->>D: Check session and event membership; reserve pending rows
+  W-->>T: Signed upload URLs
+  T->>S: Upload image bytes directly (up to four concurrent files)
+  T->>W: Confirm completed uploads
+  W->>S: Verify object existence, size and content type
+  W->>D: Mark verified photos ready
+  T->>W: Request photo preview
+  W->>D: Check role and photo ownership
+  W->>S: Fetch thumbnail or authenticated original
+  W-->>T: Return authorized image bytes
+```
+
+Customer image requests use a gallery session created by PIN verification. The
+Worker checks that the gallery is published and the photo belongs to its saved
+snapshot before returning bytes. The browser never receives a service-role key.
+
+### Database relationships
+
+```mermaid
+erDiagram
+  USERS ||--o{ SESSIONS : authenticates
+  USERS ||--o{ EVENTS : owns
+  USERS ||--o{ EVENT_MEMBERS : joins
+  EVENTS ||--o{ EVENT_MEMBERS : has
+  EVENTS ||--o{ PHOTOS : contains
+  USERS ||--o{ PHOTOS : uploads
+  EVENTS ||--o{ GALLERIES : publishes
+  GALLERIES ||--o{ GALLERY_PHOTOS : snapshots
+  PHOTOS ||--o{ GALLERY_PHOTOS : included_in
+  GALLERIES ||--o{ GALLERY_SESSIONS : authorizes
+  GALLERIES ||--o{ PIN_ATTEMPTS : records
+```
+
+| Table group | Responsibility |
+|---|---|
+| `users`, `sessions` | Hashed passwords, server sessions and revocation |
+| `events`, `event_members` | Event ownership, assigned users and per-event roles |
+| `photos` | Metadata and storage keys; file bytes live in object storage |
+| `galleries`, `gallery_photos` | PIN hash, publication state and ordered photo snapshot |
+| `gallery_sessions`, `pin_attempts` | Customer access and incorrect-PIN tracking |
+| `audit_log`, `rate_limits` | Recorded actions and request limits |
+
+Photo IDs are ULIDs; timestamps use epoch milliseconds. Signed keyset cursors
+support pagination without loading the entire collection. Event, uploader,
+filename and selection indexes support the gallery filters. See the
+[Drizzle schema](apps/api/src/db/schema.ts), [migration](supabase/migrations),
+[OpenAPI specification](docs/openapi.json), and [architecture notes](docs/architecture.md).
+
+### Repository map
+
+```text
+apps/web/             React frontend, team workspace and customer gallery
+apps/api/             Hono Worker, authorization, routes, database and storage
+packages/shared/      Validation schemas, errors, pagination and async helpers
+packages/api-client/  Generated TypeScript client and query helpers
+supabase/             Database migrations and local Supabase configuration
+e2e/                  Browser checks and real Supabase workflow tests
+docs/                 Architecture, requirements and generated API specification
+```
 
 ## Local setup with hosted Supabase
 
@@ -182,11 +309,52 @@ public `https://photos-api.<account-subdomain>.workers.dev` URL in the submissio
 links above and verify its `/ready` endpoint. Customers use this origin plus their
 gallery path. Demo access is available if the configured database was seeded.
 
-For CI, configure the GitHub `production` environment with `CLOUDFLARE_API_TOKEN`,
-`CLOUDFLARE_ACCOUNT_ID` and all seven backend variables listed in
-`apps/api/scripts/environment.mjs`. The workflow verifies types, unit tests,
-browser tests, builds, generated contracts and a workflow against local Supabase
-before deploying a push to `main`.
+## GitHub Actions and deployment status
+
+The repository is public. **CI verification and cloud deployment are separate
+jobs.** In [run 34757855267](https://github.com/shivanshu11092003/trizen/actions/runs/34757855267),
+the `verify` job passed its type checks, unit tests, build, generated-contract
+checks, browser tests and integration tests against an isolated local Supabase
+instance. The `deploy` job failed at the migration/deployment step.
+
+GitHub production deployment secrets have not been configured. The live
+application was deployed manually with Wrangler using credentials stored outside
+Git. Missing deployment credentials prevent automated deployment; repository
+visibility does not prevent CI verification. Public repositories can use
+[GitHub Actions secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets)
+without committing credentials to source code.
+
+```mermaid
+flowchart LR
+  A[Push or pull request] --> B[Verify types, unit tests and build]
+  B --> C[Browser tests and isolated Supabase integration tests]
+  C --> D{Push to main?}
+  D -->|No| E[Verification complete]
+  D -->|Yes| F[Deployment job]
+  F --> G{Production secrets configured?}
+  G -->|No - current setup| H[Automatic deployment cannot complete]
+  G -->|Yes| I[Migrate database and deploy Worker plus React assets]
+```
+
+To enable automated deployment, configure the GitHub **production** environment
+under repository **Settings → Environments → production → Environment secrets**:
+
+| Secret | Purpose |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | Authorize Worker deployments |
+| `CLOUDFLARE_ACCOUNT_ID` | Select the Cloudflare account |
+| `DATABASE_URL` | Apply migrations and connect the Worker to PostgreSQL |
+| `SUPABASE_URL` | Identify the Supabase project |
+| `SUPABASE_SERVICE_ROLE_KEY` | Access private storage from the server |
+| `SUPABASE_STORAGE_BUCKET` | Select the private image bucket |
+| `CURSOR_SECRET` | Sign pagination cursors |
+| `PIN_PEPPER` | Protect password and PIN hashes |
+| `IP_HASH_PEPPER` | Hash IP addresses in server records |
+
+Use the same existing application secrets when deploying against the existing
+database, especially `PIN_PEPPER`. The workflow reads secrets from the GitHub
+secret store; no `.env` file or production credential should be committed.
+The [workflow file](.github/workflows/ci.yml) defines the exact steps.
 
 ## Security and failure handling
 
@@ -218,6 +386,17 @@ pnpm test:e2e:live
 pnpm build
 pnpm gen:api
 ```
+
+Verification performed for the current functionality:
+
+| Check | Result |
+|---|---|
+| Unit tests | 31 passed |
+| API integration | 93 HTTP checks plus workflow assertions passed |
+| Desktop/mobile browser cases | 26 cases passed across the completed runs |
+| Real Supabase browser workflow | Passed locally and on the deployed Worker |
+| Default photo-checkbox behavior | Verified unchecked initial state, manual marking, Clear and reload |
+| Type checks and production build | Passed |
 
 Unit tests cover security primitives, pagination, concurrency, and storage error
 handling. Browser tests cover login gating, member controls, required PIN entry,
